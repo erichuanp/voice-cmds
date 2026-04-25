@@ -1,0 +1,18 @@
+name: voice-cmds
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - PySide6>=6.6
+      - sounddevice
+      - soundfile
+      - numpy
+      - sherpa-onnx
+      - onnxruntime-gpu>=1.20
+      - sentence-transformers
+      - keyboard
+      - pywin32
+      - requests
+      - tqdm

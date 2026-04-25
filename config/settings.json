@@ -1,0 +1,28 @@
+{
+  "hotkey": {
+    "start": ",+/",
+    "stop": "/",
+    "cancel": "esc"
+  },
+  "stop_mode": "hotkey",
+  "vad_silence_ms": 1000,
+  "max_chars": 15,
+  "shutdown_delay_seconds": 15,
+  "ui": {
+    "color_idle": "#00C853",
+    "color_error": "#E53935",
+    "bottom_offset_px": 8,
+    "max_capsule_width_px": 240,
+    "circle_diameter_px": 26,
+    "shadow_margin_px": 8,
+    "font_size_pt": 7
+  },
+  "match": {
+    "pinyin_distance_threshold": 2,
+    "embedding_similarity_threshold": 0.67
+  },
+  "sound": {
+    "success_enabled": true,
+    "error_enabled": true
+  }
+}

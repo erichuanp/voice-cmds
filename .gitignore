@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Project artifacts (downloaded at runtime / generated)
+models/
+logs/
+*.log
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+release/
+
+# Conda / venv
+.conda/
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
