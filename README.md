@@ -1,26 +1,33 @@
 # voice-cmds
 
-Windows 11 voice command tool — press a hotkey, talk a short command, watch a green capsule fill with your words and execute. Streaming Chinese-first STT (sherpa-onnx zipformer-bilingual), three-layer fuzzy matching (literal → pinyin → embedding), runs from system tray.
+Windows 11 voice command tool — press a hotkey, speak a short command, watch a green capsule fill with your words and execute. Streaming Chinese-first STT (sherpa-onnx zipformer-bilingual) feeds a tray-resident app; matched commands fire native Windows actions, configured apps, or user scripts.
 
 📘 **[DESIGN.md](DESIGN.md)** is the source of truth for architecture, configuration, and behavior. Always update it alongside code changes.
 
-## Quick start
+---
+
+## Install (recommended)
+
+Download the latest installer from **[Releases](https://github.com/erichuanp/voice-cmds/releases)**:
+
+- `voice-cmds-Setup-v0.0.1.exe` — installs to `%LOCALAPPDATA%\Programs\voice-cmds\`, optional autostart, no admin needed.
+
+On first launch the app downloads ~600MB of models (STT 511MB + embedder 96MB) into `models/` next to the exe. Subsequent launches start in seconds.
+
+## Run from source
 
 ```powershell
-# 1. Create the conda env
 conda env create -f environment.yml
 conda activate voice-cmds
-
-# 2. Run (model auto-downloads on first hotkey press, ~100MB)
-python main.py
-
-# Or with file logging
-python main.py --debug
+python main.py            # normal
+python main.py --debug    # writes logs to ./logs/
 ```
 
 ## Default hotkeys
 
-| Action | Keys |
+Edit `config/settings.json` or use **Tray → 设置 → 通用**.
+
+| Action | Default |
 |---|---|
 | Start recording | `Left Ctrl + Right Alt` |
 | Stop (only while recording) | `Right Alt` |
@@ -30,29 +37,40 @@ python main.py --debug
 
 关机 / 重启 / 睡眠 / 注销 / 保持开机 / 锁屏 / 音量加 / 音量减 / 静音 / 暂停 / 播放 / 下一首 / 上一首 / 关闭当前窗口 / 最小化全部 / 打开资源管理器 / 清空回收站
 
-Plus `打开 <触发词>` for any app you've added in settings.
+Plus `打开 <触发词>` for any app you've added in Settings.
 
 ## Customizing
 
-- **打开 X**: tray → 设置 → 打开 (Apps) tab → "添加新的打开"
-- **Custom scripts**: tray → 设置 → 自定义命令 tab. Bind a Chinese trigger word to any `.bat` / `.ps1` / `.exe` in the project's `scripts/` folder.
-- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`, `config/hot_words.json`. Tray → "重新加载配置" picks up changes (hotkey changes need an app restart).
+- **打开 X**: tray → 设置 → "打开 (Apps)" → 添加新的打开
+- **Custom scripts**: tray → 设置 → 自定义命令 — bind a Chinese trigger word to any `.bat` / `.ps1` / `.exe`
+- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`. Tray → "重新加载配置" picks up changes (saving from the Settings dialog auto-restarts the app).
 
-## Hot-word correction
+## Matching
 
-`config/hot_words.json` rewrites recognized text before matching:
+Two layers, in order:
 
-```json
-{ "重庆": "重启", "光剂": "关机" }
+1. **Literal** trigger match
+2. **Embedding** (BGE-small-zh-v1.5) over the full registered command set, threshold default 0.85
+
+All triggers are pre-encoded at startup so dispatch is one matmul (~1ms).
+
+## Building from source
+
+```powershell
+conda activate voice-cmds
+pip install pyinstaller
+pyinstaller voice-cmds.spec --clean --noconfirm
+# dist/voice-cmds/voice-cmds.exe   (with _internal/ deps, ~1.1 GB)
+
+# Optional installer (requires Inno Setup 6):
+iscc installer.iss
+# release/voice-cmds-Setup-v0.0.1.exe
 ```
-
-Useful when STT consistently mis-hears a specific word.
-
-## GPU notes
-
-- RTX 5080 (sm_120) needs `onnxruntime-gpu >= 1.20`, CUDA 12.4+, cuDNN 9 — already pinned in `environment.yml`.
-- App falls back to CPU automatically if CUDA fails.
 
 ## Project layout
 
 See [DESIGN.md §3](DESIGN.md#3-目录结构).
+
+## License
+
+MIT (see [LICENSE](LICENSE)).
