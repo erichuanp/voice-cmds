@@ -1,7 +1,7 @@
 {
   "hotkey": {
-    "start": ",+/",
-    "stop": "/",
+    "start": "left ctrl+right alt",
+    "stop": "right alt",
     "cancel": "esc"
   },
   "stop_mode": "hotkey",

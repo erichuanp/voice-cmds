@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -79,8 +80,34 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _seed_user_data_dirs() -> None:
+    """Frozen builds bundle config/ + scripts/ inside _internal/. Copy them to
+    the user-writable PROJECT_ROOT (next to the exe) on first run so:
+      - users can edit settings without going into the bundle
+      - the Settings dialog has a stable place to write back to
+      - reads always go through PROJECT_ROOT/config/
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    bundle = Path(sys.executable).resolve().parent / "_internal"
+    pairs = [
+        (bundle / "config", CONFIG_DIR),
+        (bundle / "scripts", SCRIPTS_DIR),
+    ]
+    for src_dir, dst_dir in pairs:
+        if not src_dir.exists():
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for src in src_dir.iterdir():
+            if src.is_file():
+                dst = dst_dir / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+
+
 class Config:
     def __init__(self) -> None:
+        _seed_user_data_dirs()
         self.settings_path = CONFIG_DIR / "settings.json"
         self.apps_path = CONFIG_DIR / "apps.json"
         self.commands_path = CONFIG_DIR / "commands.json"

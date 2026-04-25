@@ -1,13 +1,16 @@
-# build_release.ps1
-# Packages dist/voice-cmds/ into:
-#   release/voice-cmds-v0.0.1-portable.zip
-#   release/voice-cmds-Setup-v0.0.1.exe   (7-Zip SFX self-extractor)
+# build_release.ps1 [-Version "0.0.2"] [-DistDir "dist4"]
+# Packages <DistDir>/voice-cmds/ into:
+#   release/voice-cmds-v<Version>-portable.zip
+#   release/voice-cmds-Setup-v<Version>.exe   (7-Zip SFX self-extractor)
+param(
+    [string]$Version = "0.0.2",
+    [string]$DistDir = "dist"
+)
 
 $ErrorActionPreference = "Stop"
 
-$Version = "0.0.1"
 $Root    = $PSScriptRoot
-$Dist    = Join-Path $Root "dist\voice-cmds"
+$Dist    = Join-Path $Root "$DistDir\voice-cmds"
 $Out     = Join-Path $Root "release"
 $Zip     = Join-Path $Out "voice-cmds-v$Version-portable.zip"
 $Sfx7z   = Join-Path $Out "voice-cmds-Setup-v$Version.exe"
@@ -42,14 +45,18 @@ try {
 }
 
 $SfxConfig = Join-Path $env:TEMP "sfx-config-$Version.txt"
+# InstallPath defaults to %LOCALAPPDATA%\Programs\voice-cmds — user-writable,
+# so the SFX doesn't need admin elevation. User can still pick a different
+# folder in the dialog, but we steer them away from Program Files.
 @"
 ;!@Install@!UTF-8!
 Title="voice-cmds v$Version Setup"
-BeginPrompt="Install voice-cmds v$Version to the chosen folder?"
-ExtractPathText="Install location"
+BeginPrompt="Install voice-cmds v$Version? Default location is your user Programs folder (no admin needed)."
+ExtractPathText="Install location (must be user-writable — avoid Program Files)"
 ExtractPathTitle="voice-cmds v$Version"
 GUIMode="1"
 OverwriteMode="2"
+InstallPath="%LOCALAPPDATA%\\Programs\\voice-cmds"
 Shortcut="Du,{voice-cmds\voice-cmds.exe},{voice-cmds.exe},{},{voice-cmds},{voice-cmds},{0}"
 Shortcut="Pu,{voice-cmds\voice-cmds.exe},{voice-cmds.exe},{},{voice-cmds},{voice-cmds},{0}"
 RunProgram="voice-cmds\voice-cmds.exe"

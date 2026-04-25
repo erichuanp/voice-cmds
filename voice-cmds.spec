@@ -68,13 +68,12 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Reduce bloat — these are pulled in transitively but unused
+        # Reduce bloat — these are pulled in transitively but unused.
+        # Do NOT exclude stdlib modules (unittest, test, doctest, pydoc) —
+        # torch.utils._config_module / transformers / others import them
+        # at runtime and the app crashes on first embedder load.
         "matplotlib",
         "tkinter",
-        "test",
-        "unittest",
-        "pydoc",
-        "doctest",
         "notebook",
         "IPython",
         "jupyter",

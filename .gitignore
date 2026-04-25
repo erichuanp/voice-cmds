@@ -14,6 +14,7 @@ logs/
 # Build outputs
 build/
 dist/
+dist*/
 *.spec.bak
 release/
 
