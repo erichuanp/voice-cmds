@@ -1,13 +1,14 @@
 """Streaming STT using sherpa-onnx zipformer-bilingual-zh-en.
 
-Auto-downloads the model bundle on first run into ./models/. The pip wheel of
-sherpa-onnx is CPU-only (compiled without -DSHERPA_ONNX_ENABLE_GPU=ON), so we
-go straight to CPU and skip the noisy CUDA fallback log.
+Downloads individual ONNX files from HuggingFace (with hf-mirror.com
+fallback) on first run instead of the github tar.bz2 — github releases
+are unreliable in CN due to SSL interference, and HF mirrors give us a
+clean fallback path.
 """
 from __future__ import annotations
 
 import logging
-import tarfile
+import time
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
@@ -21,67 +22,123 @@ from .config import MODELS_DIR
 logger = logging.getLogger("voice_cmds.stt")
 
 MODEL_NAME = "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-MODEL_URL = (
-    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
-    "asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2"
+
+# Try official HF first, then the well-known CN mirror
+HF_HOSTS = (
+    "https://huggingface.co",
+    "https://hf-mirror.com",
+)
+HF_REPO = "csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
+HF_FILES = (
+    "encoder-epoch-99-avg-1.onnx",
+    "decoder-epoch-99-avg-1.onnx",
+    "joiner-epoch-99-avg-1.onnx",
+    "tokens.txt",
 )
 
-# Optional callback signatures:
-#   status_cb(text: str)
-#   progress_cb(current: int, total: int)  # total=0 → indeterminate
 StatusCB = Optional[Callable[[str], None]]
 ProgressCB = Optional[Callable[[int, int], None]]
 
 
-def _download(url: str, dest: Path, status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading %s -> %s", url, dest)
-    if status_cb:
-        status_cb("正在下载语音识别模型 (~500MB)…")
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("content-length", 0))
-        downloaded = 0
-        if progress_cb:
-            progress_cb(0, total)
-        with dest.open("wb") as f:
-            for chunk in r.iter_content(chunk_size=1 << 16):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                downloaded += len(chunk)
+def _hf_url(host: str, repo: str, filename: str) -> str:
+    return f"{host}/{repo}/resolve/main/{filename}"
+
+
+def _download_one(
+    url: str,
+    dest: Path,
+    label: str = "",
+    status_cb: StatusCB = None,
+    progress_cb: ProgressCB = None,
+    max_attempts: int = 3,
+) -> None:
+    """Download a single file with retry + backoff. Raises on final failure."""
+    backoff = 2.0
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info("Downloading [%d/%d] %s -> %s", attempt, max_attempts, url, dest)
+            with requests.get(url, stream=True, timeout=(15, 60)) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", 0))
+                downloaded = 0
                 if progress_cb:
-                    progress_cb(downloaded, total)
+                    progress_cb(0, total)
+                with dest.open("wb") as f:
+                    for chunk in r.iter_content(chunk_size=1 << 16):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb:
+                            progress_cb(downloaded, total)
+                # Sanity: if Content-Length present, downloaded must match
+                if total and downloaded != total:
+                    raise IOError(
+                        f"Short read: got {downloaded} of {total} bytes for {label or dest.name}"
+                    )
+            return  # success
+        except Exception as e:
+            last_err = e
+            logger.warning("Attempt %d failed for %s: %s", attempt, label or dest.name, e)
+            if dest.exists():
+                try:
+                    dest.unlink()
+                except OSError:
+                    pass
+            if attempt < max_attempts:
+                wait = backoff ** (attempt - 1)
+                if status_cb:
+                    status_cb(f"下载失败，{wait:.0f}s 后重试 ({attempt}/{max_attempts})…")
+                time.sleep(wait)
+    assert last_err is not None
+    raise last_err
+
+
+def _download_with_mirror_fallback(
+    filename: str,
+    dest: Path,
+    status_cb: StatusCB = None,
+    progress_cb: ProgressCB = None,
+) -> None:
+    """Try each HF host in order; raise if all fail."""
+    last_err: Exception | None = None
+    for host in HF_HOSTS:
+        url = _hf_url(host, HF_REPO, filename)
+        host_short = host.replace("https://", "")
+        if status_cb:
+            status_cb(f"正在下载 {filename} (来源: {host_short})…")
+        try:
+            _download_one(url, dest, label=filename, status_cb=status_cb, progress_cb=progress_cb)
+            return
+        except Exception as e:
+            last_err = e
+            logger.warning("Host %s exhausted for %s; trying next mirror", host, filename)
+            continue
+    assert last_err is not None
+    raise last_err
 
 
 def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> Path:
-    """Return the directory containing the model files; download if missing."""
+    """Return the directory containing the model files; download missing ones."""
     model_dir = MODELS_DIR / MODEL_NAME
     encoder = model_dir / "encoder-epoch-99-avg-1.onnx"
-    if encoder.exists():
+    if encoder.exists() and (model_dir / "tokens.txt").exists():
         return model_dir
 
-    archive = MODELS_DIR / f"{MODEL_NAME}.tar.bz2"
-    if not archive.exists():
-        _download(MODEL_URL, archive, status_cb=status_cb, progress_cb=progress_cb)
-
+    model_dir.mkdir(parents=True, exist_ok=True)
     if status_cb:
-        status_cb("正在解压模型…")
-    if progress_cb:
-        progress_cb(0, 0)  # indeterminate
-    logger.info("Extracting %s", archive)
-    with tarfile.open(archive, "r:bz2") as tar:
-        tar.extractall(MODELS_DIR)
-    archive.unlink(missing_ok=True)
+        status_cb("正在下载语音识别模型 (~280MB, 4 个文件)…")
+    for filename in HF_FILES:
+        dst = model_dir / filename
+        if dst.exists() and dst.stat().st_size > 0:
+            continue
+        _download_with_mirror_fallback(filename, dst, status_cb=status_cb, progress_cb=progress_cb)
     return model_dir
 
 
 class StreamingSTT:
-    """Wraps sherpa-onnx OnlineRecognizer for incremental decoding.
-
-    Construct with `StreamingSTT.prepare(...)` to allow injecting status/progress
-    callbacks during the (potentially long) download + initialization step.
-    """
+    """Wraps sherpa-onnx OnlineRecognizer for incremental decoding."""
 
     def __init__(self, recognizer, max_chars: int = 15) -> None:
         self.max_chars = max_chars

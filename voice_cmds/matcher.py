@@ -35,10 +35,33 @@ class MatchResult:
 
 
 def prepare_embedder(status_cb: Optional[Callable[[str], None]] = None):
+    """Load BGE-small-zh. If huggingface.co fails (SSL/timeout), retry via
+    hf-mirror.com (set HF_ENDPOINT before importing sentence_transformers)."""
+    import os
+
     if status_cb:
         status_cb(f"正在加载语义匹配模型 ({EMBED_MODEL_NAME})…")
+
     from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(EMBED_MODEL_NAME)
+
+    # Try official endpoint first
+    try:
+        return SentenceTransformer(EMBED_MODEL_NAME)
+    except Exception as e:
+        msg = str(e).lower()
+        is_net = any(s in msg for s in ("ssl", "timeout", "connection", "max retries", "resolve"))
+        if not is_net:
+            raise
+        logger.warning("HF download failed (%s); retrying via hf-mirror.com", e)
+        if status_cb:
+            status_cb("主源不通，正在切换到 hf-mirror 镜像…")
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        # huggingface_hub reads HF_ENDPOINT at call time, but some caches stick.
+        # Re-import to be safe.
+        import importlib
+        import huggingface_hub
+        importlib.reload(huggingface_hub)
+        return SentenceTransformer(EMBED_MODEL_NAME)
 
 
 class CommandMatcher:
