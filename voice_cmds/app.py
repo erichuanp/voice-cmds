@@ -220,19 +220,17 @@ class VoiceCmdsApp(QObject):
         self._finish_with_result(text, ok=True, result=result)
 
     def _finish_with_result(self, text: str, ok: bool, result) -> None:
-        """Show the recognized text for result_text_ms, then execute.
+        """Show the recognized text for result_text_ms, then execute / schedule.
 
         Green = matched (executes after the pause); red = no match.
-        Scheduled tasks show "已定时：…" as the result text.
+        Scheduled tasks use the same pause: after it, the task is registered
+        and the capsule switches to "已定时：…".
         """
         if not text.strip():
             # Nothing recognized at all — skip the text phase entirely.
             self.overlay.show_error()
             self._reset_after_done()
             return
-        if result is not None and result.command.kind == "schedule":
-            payload = result.command.payload
-            text = f"已定时：{format_delay(payload['delay_seconds'])}后 {payload['command']}"
         self.overlay.show_result_text(text, ok=ok)
         ms = int(self.config.settings.get("ui", {}).get("result_text_ms", 1000))
         if ms <= 0:
@@ -243,9 +241,35 @@ class VoiceCmdsApp(QObject):
         )
 
     def _execute_then_done(self, text: str, result) -> None:
-        """Phase 2: execute the matched command and show the ✓/✗ circle."""
+        """Phase 2: execute the matched command and show the ✓/✗ circle.
+
+        Schedule commands register the task here (after the same
+        result_text_ms pause) and confirm via capsule text + tray balloon.
+        """
         if result is None:
             self.overlay.show_error()
+            self._reset_after_done()
+            return
+        if result.command.kind == "schedule":
+            payload = result.command.payload
+            delay = format_delay(payload["delay_seconds"])
+            try:
+                self.executor.execute(result)
+            except Exception as e:
+                self.logger.exception("Scheduler add error: %s", e)
+                self.tray.notify("voice-cmds — 添加定时任务失败", str(e))
+                self.overlay.show_error()
+                self._reset_after_done()
+                return
+            self.overlay.show_result_text(
+                f"已定时：{delay}后 {payload['command']}", ok=True
+            )
+            self.tray.notify(
+                "voice-cmds",
+                f"已添加定时任务：{delay}后 {payload['command']}",
+                msecs=3000,
+            )
+            QTimer.singleShot(2000, self.overlay.hide_overlay)
             self._reset_after_done()
             return
         try:
@@ -257,9 +281,8 @@ class VoiceCmdsApp(QObject):
             self._reset_after_done()
             return
         # Only announce fuzzy matches — a balloon for every literal command
-        # (media keys etc.) would be noise. Scheduled tasks are confirmed by
-        # the capsule text alone (no balloon).
-        if result.layer != "literal" and result.command.kind != "schedule":
+        # (media keys etc.) would be noise.
+        if result.layer != "literal":
             self.tray.notify(
                 "voice-cmds",
                 f"“{text}” → 已执行：{result.command.trigger}",
