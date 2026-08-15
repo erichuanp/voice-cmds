@@ -306,12 +306,25 @@ class VoiceCmdsApp(QObject):
     # --- tray actions ---
     @Slot()
     def _open_settings(self) -> None:
-        d = SettingsDialog(self.config, debug=self.debug)
-        # Saving from the dialog triggers a full restart so all changes
-        # (hotkeys, new commands needing fresh embedding cache, autostart)
-        # take effect cleanly.
-        d.config_changed.connect(self._restart_after_save)
-        d.exec()
+        # Suspend global hotkeys while the settings dialog is open so that
+        # recording a hotkey (e.g. pressing Left Ctrl + Right Alt) doesn't
+        # fire the app's own start-hotkey.
+        try:
+            self.hotkey.stop()
+        except Exception:
+            pass
+        try:
+            d = SettingsDialog(self.config, debug=self.debug)
+            # Saving from the dialog triggers a full restart so all changes
+            # (hotkeys, new commands needing fresh embedding cache, autostart)
+            # take effect cleanly.
+            d.config_changed.connect(self._restart_after_save)
+            d.exec()
+        finally:
+            try:
+                self.hotkey.start()
+            except Exception:
+                pass
 
     @Slot()
     def _show_help(self) -> None:
