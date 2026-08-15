@@ -49,6 +49,7 @@ datas += [
     ("config/settings.json", "config"),
     ("config/apps.json", "config"),
     ("config/commands.json", "config"),
+    ("config/tasks.json", "config"),
     ("scripts/del_des_png.bat", "scripts"),
     ("README.md", "."),
     ("DESIGN.md", "."),

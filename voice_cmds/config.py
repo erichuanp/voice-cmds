@@ -113,12 +113,14 @@ class Config:
         self.settings_path = CONFIG_DIR / "settings.json"
         self.apps_path = CONFIG_DIR / "apps.json"
         self.commands_path = CONFIG_DIR / "commands.json"
+        self.tasks_path = CONFIG_DIR / "tasks.json"
         self.reload()
 
     def reload(self) -> None:
         self.settings = _deep_merge(DEFAULT_SETTINGS, _read_json(self.settings_path, {}))
         self.apps = _read_json(self.apps_path, [])
         self.commands = _read_json(self.commands_path, [])
+        self.tasks = _read_json(self.tasks_path, [])
 
     def save_settings(self) -> None:
         _write_json(self.settings_path, self.settings)
@@ -128,3 +130,6 @@ class Config:
 
     def save_commands(self) -> None:
         _write_json(self.commands_path, self.commands)
+
+    def save_tasks(self) -> None:
+        _write_json(self.tasks_path, self.tasks)

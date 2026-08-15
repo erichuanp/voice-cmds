@@ -17,9 +17,11 @@ from .audio import CHUNK_MS, MicrophoneStream
 from .config import Config
 from .executor import CommandExecutor
 from .hotkey import HotkeyManager
-from .matcher import CommandMatcher
+from .matcher import CommandMatcher, format_delay
+from .scheduler import TaskScheduler
 from .ui.overlay import OverlayWindow
 from .ui.settings import SettingsDialog
+from .ui.tasks import TasksWindow
 from .ui.tray import TrayIcon
 
 
@@ -55,6 +57,11 @@ class VoiceCmdsApp(QObject):
         self.audio = MicrophoneStream()
         self.overlay = OverlayWindow(self.config.settings)
         self.tray = TrayIcon(self)
+        self.scheduler = TaskScheduler(
+            self.config, self.matcher, self.executor, tray=self.tray
+        )
+        self.executor.scheduler = self.scheduler
+        self._tasks_win = None
         self.hotkey = HotkeyManager(
             self.config.settings["hotkey"]["start"],
             self.config.settings["hotkey"]["stop"],
@@ -85,6 +92,7 @@ class VoiceCmdsApp(QObject):
         self.vad_finalize.connect(self._finalize_and_process)
         self.tray.settings_requested.connect(self._open_settings)
         self.tray.help_requested.connect(self._show_help)
+        self.tray.tasks_requested.connect(self._open_tasks)
         self.tray.reload_requested.connect(self._reload_config)
         self.tray.exit_requested.connect(self.shutdown)
 
@@ -215,12 +223,16 @@ class VoiceCmdsApp(QObject):
         """Show the recognized text for result_text_ms, then execute.
 
         Green = matched (executes after the pause); red = no match.
+        Scheduled tasks show "已定时：…" as the result text.
         """
         if not text.strip():
             # Nothing recognized at all — skip the text phase entirely.
             self.overlay.show_error()
             self._reset_after_done()
             return
+        if result is not None and result.command.kind == "schedule":
+            payload = result.command.payload
+            text = f"已定时：{format_delay(payload['delay_seconds'])}后 {payload['command']}"
         self.overlay.show_result_text(text, ok=ok)
         ms = int(self.config.settings.get("ui", {}).get("result_text_ms", 1000))
         if ms <= 0:
@@ -244,9 +256,10 @@ class VoiceCmdsApp(QObject):
             self.overlay.show_error()
             self._reset_after_done()
             return
-        # Only announce fuzzy matches — a balloon for every literal
-        # command (media keys etc.) would be noise.
-        if result.layer != "literal":
+        # Only announce fuzzy matches — a balloon for every literal command
+        # (media keys etc.) would be noise. Scheduled tasks are confirmed by
+        # the capsule text alone (no balloon).
+        if result.layer != "literal" and result.command.kind != "schedule":
             self.tray.notify(
                 "voice-cmds",
                 f"“{text}” → 已执行：{result.command.trigger}",
@@ -283,6 +296,18 @@ class VoiceCmdsApp(QObject):
             box.exec()
         except Exception:
             self.logger.exception("Failed to show help dialog")
+
+    @Slot()
+    def _open_tasks(self) -> None:
+        try:
+            if self._tasks_win is None:
+                self._tasks_win = TasksWindow(self.scheduler, parent=None)
+            self._tasks_win.refresh()
+            self._tasks_win.show()
+            self._tasks_win.raise_()
+            self._tasks_win.activateWindow()
+        except Exception:
+            self.logger.exception("Failed to open tasks window")
 
     @Slot()
     def _reload_config(self) -> None:

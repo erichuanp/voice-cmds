@@ -25,18 +25,16 @@ logger = logging.getLogger("voice_cmds.matcher")
 
 EMBED_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 
-# "10分钟后关机" / "十分钟后关机" / "半小时后关机" / "一小时后关机"
-_TIMED_SHUTDOWN_RE = re.compile(
-    r"^(?P<num>\d+|[零一二两三四五六七八九十半百]+)"
-    r"(?:个)?\s*(?P<unit>分钟|小时|钟头)"
-    r"(?:后)?\s*(?:再)?\s*关机$"
-)
-
 _CN_DIGITS = {
     "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
     "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
 }
-_UNIT_SECONDS = {"分钟": 60, "小时": 3600, "钟头": 3600}
+
+# "<时间>后<命令>": 3小时后打开资源管理器 / 一小时四十一分十二秒后锁屏 /
+# 半小时后静音 / 十五秒后关机. Ranges: 时 0-167, 分 0-59, 秒 0-59.
+_TIME_TOKEN_RE = re.compile(
+    r"(\d+|[零一二两三四五六七八九十百]+|半)\s*(?:个)?\s*(小时|钟头|时|分钟|分|秒)"
+)
 
 
 def _to_toned_pinyin(text: str) -> str:
@@ -57,9 +55,9 @@ def _to_toned_pinyin(text: str) -> str:
 
 
 def _cn_num_to_int(s: str) -> int | None:
-    """'十' -> 10, '三十分钟' -> 30, '半' -> None (caller handles halves)."""
+    """'十' -> 10, '三十分钟' -> 30. Returns None for '半' or invalid input."""
     if s == "半":
-        return None  # caller resolves half of the unit
+        return None
     total = 0
     cur = 0
     for ch in s:
@@ -76,27 +74,85 @@ def _cn_num_to_int(s: str) -> int | None:
     return total + cur
 
 
-def _parse_timed_shutdown(text: str) -> int | None:
-    """Return shutdown delay in seconds, or None if the text isn't a timed shutdown."""
-    m = _TIMED_SHUTDOWN_RE.match(text)
-    if not m:
-        return None
-    num_raw, unit = m.group("num"), m.group("unit")
-    unit_s = _UNIT_SECONDS[unit]
-    if num_raw.isdigit():
-        value = int(num_raw)
-    else:
-        if num_raw == "半":
-            value = 0.5
+def _num_to_int(raw: str) -> float | None:
+    if raw.isdigit():
+        return float(raw)
+    if raw == "半":
+        return 0.5
+    v = _cn_num_to_int(raw)
+    return float(v) if v is not None else None
+
+
+_UNIT_SECONDS = {"小时": 3600, "钟头": 3600, "时": 3600, "分钟": 60, "分": 60, "秒": 1}
+
+
+def _parse_time_tokens(prefix: str) -> int | None:
+    """Parse '3小时30分15秒' / '一小时零五分' -> total seconds, or None.
+
+    The whole prefix must be consumed. Optional 零 / 个 fillers between
+    tokens are tolerated. Range checks: 时 0-167, 分 0-59, 秒 0-59.
+    """
+    pos = 0
+    h = m = s = 0.0
+    found = False
+    n = len(prefix)
+    while pos < n:
+        if prefix[pos].isspace() or prefix[pos] in "零个":
+            pos += 1
+            continue
+        tok = _TIME_TOKEN_RE.match(prefix, pos)
+        if not tok:
+            return None
+        value = _num_to_int(tok.group(1))
+        if value is None:
+            return None
+        unit = tok.group(2)
+        if unit in ("小时", "钟头", "时"):
+            h += value
+        elif unit in ("分钟", "分"):
+            m += value
         else:
-            cn = _cn_num_to_int(num_raw)
-            if cn is None:
-                return None
-            value = float(cn)
-    seconds = int(value * unit_s)
-    if seconds <= 0 or seconds > 24 * 3600:
+            s += value
+        pos = tok.end()
+        found = True
+    if not found:
         return None
-    return seconds
+    if not (0 <= h <= 167) or not (0 <= m <= 59) or not (0 <= s <= 59):
+        return None
+    total = int(h * 3600 + m * 60 + s)
+    return total if total > 0 else None
+
+
+def format_delay(seconds: int) -> str:
+    """167*3600-style total seconds -> '3小时30分15秒' (zero units omitted)."""
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f"{h}小时")
+    if m:
+        parts.append(f"{m}分")
+    if s:
+        parts.append(f"{s}秒")
+    return "".join(parts) or "0秒"
+
+
+def _parse_timed_command(text: str) -> tuple[int, str] | None:
+    """'<时间>后<命令>' -> (delay_seconds, command), or None if not a match.
+
+    Tries the leftmost '后' whose prefix parses fully as time tokens and
+    whose suffix is a non-empty command.
+    """
+    idx = text.find("后")
+    while idx >= 0:
+        prefix, suffix = text[:idx], text[idx + 1:]
+        cmd = suffix.strip()
+        if cmd:
+            seconds = _parse_time_tokens(prefix)
+            if seconds is not None:
+                return seconds, cmd
+        idx = text.find("后", idx + 1)
+    return None
 
 
 @dataclass
@@ -216,19 +272,22 @@ class CommandMatcher:
             if r:
                 return r
 
-        # 1. Timed shutdown pattern: "10分钟后关机" / "半小时后关机" / …
-        seconds = _parse_timed_shutdown(text)
-        if seconds is not None:
-            logger.info("Timed shutdown parsed: %s -> %d s", text, seconds)
+        # 1. Timed task pattern: "<时间>后<命令>" — e.g. "三小时后打开资源管理器",
+        #    "3小时30分15秒后锁屏". Returns a schedule command (executed by the
+        #    scheduler after the delay) rather than a native shutdown.
+        timed = _parse_timed_command(text)
+        if timed is not None:
+            delay_s, cmd = timed
+            logger.info("Timed command parsed: %s -> %d s later: %r", text, delay_s, cmd)
             return MatchResult(
                 CommandSpec(
-                    f"{seconds // 60}分钟后关机",
-                    "system",
-                    {"fn": "delayed_shutdown", "seconds": seconds},
+                    f"{format_delay(delay_s)}后 {cmd}",
+                    "schedule",
+                    {"delay_seconds": delay_s, "command": cmd},
                 ),
                 "pattern",
                 1.0,
-                arg=str(seconds),
+                arg=str(delay_s),
             )
 
         # 2. Literal full match against any trigger (commands or apps)
@@ -354,8 +413,8 @@ class CommandMatcher:
         system_triggers = sorted({s.trigger for s in self.specs if s.kind == "system"})
         lines.append("、".join(system_triggers))
         lines += [
-            "<br/><b>定时关机：</b>“10分钟后关机”、“半小时后关机”、“一小时后关机”（单位：分钟/小时/钟头）",
-            "<br/><b>取消关机：</b>说“取消关机”或“保持开机”",
+            "<br/><b>定时任务：</b>“&lt;时间&gt;后&lt;命令&gt;”，如“3小时后打开资源管理器”、“半小时后静音”、“一小时四十一分十二秒后锁屏”（时 0–167，分/秒 0–59，支持中文数字）",
+            "<br/><b>任务列表：</b>托盘 → 定时任务 可查看/编辑/删除任务，手动添加支持指定时刻、每日重复、循环执行；说“取消关机”会同时取消未执行的关机/重启任务",
         ]
         if self.config.apps:
             app_triggers = sorted(e["trigger"] for e in self.config.apps)

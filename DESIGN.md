@@ -47,8 +47,9 @@ voice-cmds/
 │   ├── monitor.py            ← 焦点显示器（按光标位置）
 │   ├── audio.py              ← 麦克风采集
 │   ├── stt.py                ← sherpa-onnx 流式封装
-│   ├── matcher.py            ← 命令匹配（字面 → 拼音 → embedding）
+│   ├── matcher.py            ← 命令匹配（定时语法 → 字面 → 拼音 → embedding）
 │   ├── executor.py           ← 命令分发与执行
+│   ├── scheduler.py          ← 定时任务调度（once/daily/delay/loop）
 │   ├── logger.py             ← --debug 日志
 │   ├── commands/
 │   │   ├── __init__.py
@@ -57,13 +58,15 @@ voice-cmds/
 │   └── ui/
 │       ├── overlay.py        ← 录音浮窗（圆 → 胶囊动画）
 │       ├── tray.py           ← 托盘菜单
-│       └── settings.py       ← 设置窗口
+│       ├── settings.py       ← 设置窗口
+│       └── tasks.py          ← 定时任务列表 + 添加/编辑窗口
 ├── scripts/                  ← 用户自定义 .bat / .ps1
 │   └── del_des_png.bat       ← 示例（"吃饭" → 删桌面 png）
 ├── config/
 │   ├── settings.json         ← 全局设置
 │   ├── apps.json             ← "打开 XX" 触发词→路径
-│   └── commands.json         ← 自定义命令触发词→脚本
+│   ├── commands.json         ← 自定义命令触发词→脚本
+│   └── tasks.json            ← 定时任务（§7.4）
 │   # hot_words.json removed in 0.2 — replaced by embedding-only fallback
 ├── assets/
 │   ├── tray.ico
@@ -158,15 +161,16 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 ## 6. 命令匹配
 
-三层（按顺序，全部在 `matcher.py`）：
+四层（按顺序，全部在 `matcher.py`）：
 
-1. **字面完全匹配** → 命中即执行
-2. **拼音+声调 embedding**：文本先转 `拼音+声调`（`清空回收站 → qing1kong1hui2shou1zhan4`）再编码，余弦相似度 ≥ `pinyin_similarity_threshold`（默认 **0.88**）命中。STT 同音误识别因此能以极高相似度命中（“晴空挥手站 → qing2kong1hui1shou3zhan4”，sim ≈ 0.99；“锁屏/所评”sim = 1.0）
-3. **原文 embedding 兜底**：≥ `embedding_similarity_threshold`（默认 0.85）命中，覆盖与读音无关的语义变体
+0. **“打开 X”路径**：只与 X 相关的应用触发词匹配（字面 → 拼音 → 原文）
+1. **定时模式**：`<时间>后<命令>` → kind=`schedule`，交由调度器延迟执行（§7.4）。时间支持阿拉伯/中文数字（时 0–167，分/秒 0–59，超范围不匹配 → 红叉）
+2. **字面完全匹配** → 命中即执行
+3. **拼音+声调 embedding**：文本先转 `拼音+声调`（`清空回收站 → qing1kong1hui2shou1zhan4`）再编码，余弦相似度 ≥ `pinyin_similarity_threshold`（默认 **0.88**）命中。STT 同音误识别因此能以极高相似度命中（“晴空挥手站 → qing2kong1hui1shou3zhan4”，sim ≈ 0.99；“锁屏/所评”sim = 1.0）
+4. **原文 embedding 兜底**：≥ `embedding_similarity_threshold`（默认 0.85）命中，覆盖与读音无关的语义变体
 
 > 所有触发词（系统+自定义+应用）在启动时预编码 **两套** 向量（拼音版 + 原文版），dispatch 时只需对单条输入做两次 encode + matmul。
 > 拼音层阈值单独提高是因为无关拼音串的基线相似度约 0.7–0.8，必须与“原文层”阈值分开。
-> “打开 X”路径只在与 X 相关的应用触发词里匹配（字面 → 拼音 → 原文）。
 > 无命中 → 失败状态 + debug 日志记录原文 + 最佳分数。
 
 ---
@@ -191,10 +195,29 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 | 最小化全部 | Shell.Application MinimizeAll | ✅ |
 | 打开资源管理器 | `explorer.exe` | ✅ |
 | 清空回收站 | `SHEmptyRecycleBin` | ✅ |
-| 定时关机（`<N>分钟后关机`） | `shutdown /s /t <N*60>`；支持阿拉伯/中文数字与「半小时」 | ✅ |
 
-> 模式：`^(\d+|[零一二两三四五六七八九十半百]+)个?(分钟|小时|钟头)后?再?关机$`，上限 24 小时。
 > **如果某条实现遇阻**：先注册触发词入口，但执行体替换为「占位提示音」（播 `assets/success.wav`）+ 日志记录 "TODO"，不阻塞整体上线。
+
+### 7.4 定时任务（`scheduler.py` + `ui/tasks.py`）
+
+- **语音语法**：`<时间>后<命令>`，如 `3小时后打开资源管理器`、`一小时四十一分十二秒后锁屏`、`半小时后静音`、`十五秒后关机`。
+  - 时间 = 若干 `数字+单位` 片段（单位：小时/钟头/时、分钟/分、秒；支持“半”“两”及中文数字 0–99/百）。
+  - 范围校验：时 0–167、分 0–59、秒 0–59；超出范围或时间全 0 → 不匹配（红叉）。
+  - 命令部分走正常匹配管线；**不再使用原生 `shutdown /t` 定时**。
+- **任务类型**（持久化于 `config/tasks.json`，重启恢复）：
+  | kind | 说明 | 图标 |
+  |---|---|---|
+  | `once` | 指定日期时刻执行一次 | 执行后 ✓/✗ |
+  | `daily` | 每天 HH:MM 执行（程序活着才跑，不补跑） | 永不显示图标 |
+  | `delay` | 添加起 N 秒后执行一次 | 执行后 ✓/✗ |
+  | `loop` | 每 N 秒循环执行 | 永不显示图标 |
+- **重启恢复规则**：
+  - `once`/`delay` 已过期 → ✗，原因“程序未运行时已过期”
+  - `daily` 不补跑；`loop` 下次触发 = `created + k*period`（k 为使时间落在未来的最小整数，即 `(now-created)%period` 推算）
+- **托盘 → 定时任务**：任务列表窗口（右键行 → 编辑 / 删除；底部「删除全部已执行/失败任务」）。✗ 悬停显示失败原因。
+- **添加/编辑对话框**：「定时」开 → 日期时间 + 「每日重复」开关；「定时」关 → 时/分/秒 输入 + 同开关变「循环执行」。命令输入框 + 「立刻执行 / 保存 / 取消」（立刻执行只跑一次命令，不保存不关窗）。
+- **“取消关机”**：`shutdown /a` 之外同时取消所有未执行且命令匹配 关机/重启 的定时任务。
+- **语音添加反馈**：胶囊显示 `已定时：<时间>后 <命令>`，不弹托盘气泡。
 
 ### 7.2 用户自定义命令（`config/commands.json`）
 
@@ -266,7 +289,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 - 开机自启动（debug 模式锁定）
 - _未来扩展项位置_：用户提到"还在想"，预留菜单项
 
-托盘菜单：**设置 / 帮助 / 重新加载配置 / 退出**。「帮助」弹窗列出全部内置命令、定时关机语法与「打开 X」可用触发词。
+托盘菜单：**设置 / 帮助 / 定时任务 / 重新加载配置 / 退出**。「帮助」弹窗列出全部内置命令、定时任务语法与「打开 X」可用触发词；「定时任务」打开任务列表（§7.4）。
 
 ---
 

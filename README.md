@@ -44,7 +44,7 @@ Edit `config/settings.json` or use **Tray → 设置 → 通用**.
 
 关机 / 重启 / 睡眠 / 注销 / 保持开机 / 锁屏 / 音量加 / 音量减 / 静音 / 暂停 / 播放 / 下一首 / 上一首 / 关闭当前窗口 / 最小化全部 / 打开资源管理器 / 清空回收站
 
-Plus **timed shutdown**: `10分钟后关机` / `十分钟后关机` / `半小时后关机` / `一小时后关机` (units: 分钟 / 小时 / 钟头, up to 24 h; cancel with 取消关机).
+Plus **timed tasks**: `<时间>后<命令>` — `3小时后打开资源管理器` / `一小时四十一分十二秒后锁屏` / `半小时后静音` / `十五秒后关机` (Arabic or Chinese numerals; 时 0–167, 分/秒 0–59). Manage them in **Tray → 定时任务** (edit / delete / 每日重复 / 循环执行 / manual add); `取消关机` also cancels pending 关机/重启 tasks.
 
 Plus `打开 <触发词>` for any app you've added in Settings.
 

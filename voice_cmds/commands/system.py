@@ -48,12 +48,6 @@ def shutdown(config, logger):
     _run(["shutdown", "/s", "/t", str(delay)], logger)
 
 
-def delayed_shutdown(config, logger, seconds: int):
-    """'X分钟后关机' — pattern-matched timed shutdown."""
-    seconds = max(1, int(seconds))
-    _run(["shutdown", "/s", "/t", str(seconds)], logger)
-
-
 def restart(config, logger):
     delay = config.settings["shutdown_delay_seconds"]
     _run(["shutdown", "/r", "/t", str(delay)], logger)
@@ -69,8 +63,17 @@ def logoff(config, logger):
     _run(["shutdown", "/l", "/t", str(delay)], logger)
 
 
-def abort_shutdown(config, logger):
+def abort_shutdown(config, logger, scheduler=None):
     _run(["shutdown", "/a"], logger)
+    # Also cancel pending scheduled 关机/重启 tasks (the scheduler matches
+    # each task's command text against the same command set).
+    if scheduler is not None:
+        try:
+            cancelled = scheduler.cancel_matching({"shutdown", "restart"})
+            if cancelled:
+                logger.info("Cancelled %d scheduled shutdown/restart task(s)", cancelled)
+        except Exception as e:
+            logger.warning("Failed to cancel scheduled shutdown tasks: %s", e)
 
 
 def lock(config, logger):
