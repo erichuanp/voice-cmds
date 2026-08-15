@@ -92,6 +92,25 @@ a = Analysis(
     optimize=0,
 )
 
+# --- Force the env's OpenSSL (the build matching _ssl.pyd) ---------------
+# conda keeps the correct OpenSSL in <prefix>/Library/bin, but PyInstaller's
+# DLL scanner can miss it or pick up stale/mismatched copies from elsewhere —
+# a frozen app then fails every HTTPS download with
+# "Can't connect to HTTPS URL because the SSL module is not available".
+# Drop any libssl/libcrypto the analysis found and always bundle these.
+import os as _os
+import sys as _sys
+
+_ssl_dlls = {}
+for _name in ("libssl-3-x64.dll", "libcrypto-3-x64.dll"):
+    _p = _os.path.join(_sys.prefix, "Library", "bin", _name)
+    if _os.path.exists(_p):
+        _ssl_dlls[_name] = _p
+if _ssl_dlls:
+    a.binaries = [b for b in a.binaries if b[0] not in _ssl_dlls]
+    for _name, _p in _ssl_dlls.items():
+        a.binaries.append((_name, _p, "BINARY"))
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
