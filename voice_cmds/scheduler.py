@@ -108,8 +108,12 @@ class TaskScheduler(QObject):
                 if dt is not None and dt.timestamp() <= now:
                     t.status, t.error = "error", "程序未运行时已过期"
             elif t.kind == "daily":
+                # Legacy entries stored only HH:MM — synthesize a start time
+                # today so they take the "plain daily" path.
+                if not t.at and t.daily_time:
+                    t.at = f"{today} {t.daily_time}:00"
                 # No catch-up: it only fires while the program is alive.
-                self._daily_fired[t.id] = ""  # fires at next matching HH:MM
+                self._daily_fired[t.id] = ""
             elif t.kind == "delay":
                 if now >= t.created_at + t.delay_seconds:
                     t.status, t.error = "error", "程序未运行时已过期"
@@ -147,8 +151,18 @@ class TaskScheduler(QObject):
         self._save()
         return t
 
-    def add_daily(self, command: str, hhmm: str) -> Task:
-        t = Task(id=uuid.uuid4().hex, kind="daily", command=command, daily_time=hhmm)
+    def add_daily(self, command: str, dt: datetime) -> Task:
+        """Daily repeat starting at a full datetime: first execution at dt.
+
+        If dt is in the past, the date part loses its meaning and the task
+        runs every day at dt's HH:MM (today if not passed, else tomorrow).
+        """
+        t = Task(
+            id=uuid.uuid4().hex,
+            kind="daily",
+            command=command,
+            at=dt.strftime("%Y-%m-%d %H:%M:%S"),
+        )
         self._daily_fired[t.id] = ""
         self._tasks.append(t)
         self._save()
@@ -233,10 +247,26 @@ class TaskScheduler(QObject):
                         if dt is not None and dt.timestamp() <= now:
                             self._fire(t)
                 elif t.kind == "daily":
-                    if now_dt.strftime("%H:%M") == t.daily_time:
-                        today = now_dt.strftime("%Y-%m-%d")
-                        if self._daily_fired.get(t.id) != today:
-                            self._daily_fired[t.id] = today
+                    dt = _parse_dt(t.at)
+                    if dt is None:
+                        continue
+                    today = now_dt.date()
+                    if dt.date() > today:
+                        # 首次执行在设置的未来日期时间点
+                        if (
+                            now_dt >= dt
+                            and self._daily_fired.get(t.id) != dt.strftime("%Y-%m-%d")
+                        ):
+                            self._daily_fired[t.id] = dt.strftime("%Y-%m-%d")
+                            self._fire(t)
+                    else:
+                        # 年月日失去意义 → 每天 HH:MM
+                        fire_dt = datetime.combine(today, dt.time())
+                        if (
+                            now_dt >= fire_dt
+                            and self._daily_fired.get(t.id) != now_dt.strftime("%Y-%m-%d")
+                        ):
+                            self._daily_fired[t.id] = now_dt.strftime("%Y-%m-%d")
                             self._fire(t)
                 elif t.kind == "delay":
                     if t.status == "pending" and now >= t.created_at + t.delay_seconds:

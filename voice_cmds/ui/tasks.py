@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..matcher import format_delay
-from ..scheduler import Task
+from ..scheduler import Task, _parse_dt
 from .common import DIALOG_STYLE, hint
 
 
@@ -73,35 +73,49 @@ class TaskEditDialog(QDialog):
         self.setStyleSheet(DIALOG_STYLE)
         self.resize(430, 230)
 
-        # --- timed switch + datetime ---
+        # --- row 1: 定时 + repeat switch ---
         self.timed_check = QCheckBox("定时")
+        self.repeat_check = QCheckBox("每日重复")  # ⇄ 循环执行 when 定时 off
+
+        # --- row 2a (定时 off): 在添加该任务 [时]时 [分]分 [秒]秒 后执行 ---
+        self.h_spin = QSpinBox()
+        self.h_spin.setRange(0, 167)
+        self.m_spin = QSpinBox()
+        self.m_spin.setRange(0, 59)
+        self.s_spin = QSpinBox()
+        self.s_spin.setRange(0, 59)
+        self._delay_prefix = QLabel("在添加该任务")
+        self._delay_suffix = QLabel("后执行")
+        self._h_suffix = QLabel("时")
+        self._m_suffix = QLabel("分")
+        self._s_suffix = QLabel("秒")
+        delay_row = QHBoxLayout()
+        delay_row.setSpacing(6)
+        for w in (
+            self._delay_prefix, self.h_spin, self._h_suffix,
+            self.m_spin, self._m_suffix, self.s_spin, self._s_suffix,
+            self._delay_suffix,
+        ):
+            delay_row.addWidget(w)
+        delay_row.addStretch(1)
+        self._delay_row_widgets = [
+            self._delay_prefix, self.h_spin, self._h_suffix,
+            self.m_spin, self._m_suffix, self.s_spin, self._s_suffix,
+            self._delay_suffix,
+        ]
+
+        # --- row 2b (定时 on): date-time + 开始执行重复 ---
         self.dt_edit = QDateTimeEdit()
         self.dt_edit.setCalendarPopup(True)
         self.dt_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
         default_dt = datetime.now() + timedelta(hours=1)
         self.dt_edit.setDateTime(default_dt.replace(second=0, microsecond=0))
-
-        # --- repeat switch (每日重复 ⇄ 循环执行) ---
-        self.repeat_check = QCheckBox("每日重复")
-
-        # --- delay spins (时/分/秒) ---
-        self.h_spin = QSpinBox()
-        self.h_spin.setRange(0, 167)
-        self.h_spin.setSuffix(" 时")
-        self.m_spin = QSpinBox()
-        self.m_spin.setRange(0, 59)
-        self.m_spin.setSuffix(" 分")
-        self.s_spin = QSpinBox()
-        self.s_spin.setRange(0, 59)
-        self.s_spin.setSuffix(" 秒")
-        delay_row = QHBoxLayout()
-        delay_row.addWidget(self.h_spin)
-        delay_row.addWidget(self.m_spin)
-        delay_row.addWidget(self.s_spin)
-        self._delay_label = QLabel("后执行（从添加时起算）")
-        delay_row.addWidget(self._delay_label)
-        delay_row.addStretch(1)
-        self._delay_row_widgets = [self.h_spin, self.m_spin, self.s_spin]
+        self._repeat_start_label = QLabel("开始执行重复")
+        dt_row = QHBoxLayout()
+        dt_row.setSpacing(6)
+        dt_row.addWidget(self.dt_edit)
+        dt_row.addWidget(self._repeat_start_label)
+        dt_row.addStretch(1)
 
         # --- command ---
         self.cmd_edit = QLineEdit()
@@ -119,14 +133,14 @@ class TaskEditDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(10)
-        timed_row = QHBoxLayout()
-        timed_row.setSpacing(10)
-        timed_row.addWidget(self.timed_check)
-        timed_row.addWidget(self.dt_edit)
-        timed_row.addWidget(self.repeat_check)
-        timed_row.addStretch(1)
-        layout.addLayout(timed_row)
+        switch_row = QHBoxLayout()
+        switch_row.setSpacing(16)
+        switch_row.addWidget(self.timed_check)
+        switch_row.addWidget(self.repeat_check)
+        switch_row.addStretch(1)
+        layout.addLayout(switch_row)
         layout.addLayout(delay_row)
+        layout.addLayout(dt_row)
         layout.addWidget(QLabel("命令内容"))
         layout.addWidget(self.cmd_edit)
         btn_row = QHBoxLayout()
@@ -135,7 +149,8 @@ class TaskEditDialog(QDialog):
         btn_row.addWidget(buttons)
         layout.addLayout(btn_row)
 
-        self.timed_check.toggled.connect(self._sync_visibility)
+        self.timed_check.toggled.connect(lambda _: self._sync_visibility())
+        self.repeat_check.toggled.connect(lambda _: self._sync_visibility())
         self._prefill()
         self._sync_visibility()
 
@@ -147,18 +162,18 @@ class TaskEditDialog(QDialog):
         self.cmd_edit.setText(t.command)
         if t.kind in ("once", "daily"):
             self.timed_check.setChecked(True)
-            if t.kind == "daily":
+            dt = None
+            try:
+                dt = datetime.strptime(t.at, "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                pass
+            if dt is None and t.daily_time:
+                # legacy daily task stored only HH:MM
                 hh, mm = (int(x) for x in t.daily_time.split(":"))
-                base = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
-                self.dt_edit.setDateTime(base)
-                self.repeat_check.setChecked(True)
-            else:
-                try:
-                    dt = datetime.strptime(t.at, "%Y-%m-%d %H:%M:%S")
-                    self.dt_edit.setDateTime(dt)
-                except ValueError:
-                    pass
-                self.repeat_check.setChecked(False)
+                dt = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if dt is not None:
+                self.dt_edit.setDateTime(dt)
+            self.repeat_check.setChecked(t.kind == "daily")
         else:  # delay / loop
             self.timed_check.setChecked(False)
             secs = t.period_seconds if t.kind == "loop" else t.delay_seconds
@@ -171,11 +186,12 @@ class TaskEditDialog(QDialog):
 
     def _sync_visibility(self) -> None:
         timed = self.timed_check.isChecked()
-        self.dt_edit.setVisible(timed)
         self.repeat_check.setText("每日重复" if timed else "循环执行")
         for w in self._delay_row_widgets:
             w.setVisible(not timed)
-        self._delay_label.setVisible(not timed)
+        self.dt_edit.setVisible(timed)
+        # "开始执行重复" only when 定时 + 每日重复 are both on
+        self._repeat_start_label.setVisible(timed and self.repeat_check.isChecked())
 
     def _total_seconds(self) -> int:
         return self.h_spin.value() * 3600 + self.m_spin.value() * 60 + self.s_spin.value()
@@ -200,11 +216,14 @@ class TaskEditDialog(QDialog):
         repeat = self.repeat_check.isChecked()
         try:
             if timed and repeat:
+                # 每日重复：首次执行在设置的日期时间点；时间早于现在则立即
+                # 按每天 HH:MM 生效（年月日失去意义）。
+                dt = self.dt_edit.dateTime().toPython()
                 new = Task(
                     id=self.task.id if self.task else "",
                     kind="daily",
                     command=cmd,
-                    daily_time=self.dt_edit.time().toString("HH:mm"),
+                    at=dt.strftime("%Y-%m-%d %H:%M:%S"),
                 )
             elif timed:
                 dt = self.dt_edit.dateTime().toPython()
@@ -248,7 +267,7 @@ class TaskEditDialog(QDialog):
                 if new.kind == "once":
                     self.scheduler.add_once(new.command, datetime.strptime(new.at, "%Y-%m-%d %H:%M:%S"))
                 elif new.kind == "daily":
-                    self.scheduler.add_daily(new.command, new.daily_time)
+                    self.scheduler.add_daily(new.command, datetime.strptime(new.at, "%Y-%m-%d %H:%M:%S"))
                 elif new.kind == "loop":
                     self.scheduler.add_loop(new.command, new.period_seconds)
                 else:
@@ -336,7 +355,13 @@ class TasksWindow(QDialog):
         if t.kind == "once":
             return t.at
         if t.kind == "daily":
-            return f"每天 {t.daily_time}"
+            dt = _parse_dt(t.at)
+            if dt is None:
+                return f"每天 {t.daily_time}" if t.daily_time else ""
+            hhmm = t.at[11:16]
+            if dt.date() > datetime.fromtimestamp(now).date():
+                return f"首次 {t.at}；之后每天 {hhmm}"
+            return f"每天 {hhmm}"
         if t.kind == "delay":
             remaining = max(0, int(t.created_at + t.delay_seconds - now))
             state = ""

@@ -43,7 +43,13 @@ class TrayIcon(QObject):
         menu.addSeparator()
         menu.addAction(act_exit)
         self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_activated)
         self.tray.show()
+
+    def _on_activated(self, reason) -> None:
+        # Double-click the tray icon → open settings.
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.settings_requested.emit()
 
     def notify(self, title: str, message: str, msecs: int = 5000) -> None:
         """Balloon notification from the tray icon."""
