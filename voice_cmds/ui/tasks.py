@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -98,24 +99,34 @@ class TaskEditDialog(QDialog):
         ):
             delay_row.addWidget(w)
         delay_row.addStretch(1)
-        self._delay_row_widgets = [
-            self._delay_prefix, self.h_spin, self._h_suffix,
-            self.m_spin, self._m_suffix, self.s_spin, self._s_suffix,
-            self._delay_suffix,
-        ]
 
-        # --- row 2b (定时 on): date-time + 开始执行重复 ---
+        # --- row 2b (定时 on): date-time + 开始执行/开始重复执行 ---
         self.dt_edit = QDateTimeEdit()
         self.dt_edit.setCalendarPopup(True)
         self.dt_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
         default_dt = datetime.now() + timedelta(hours=1)
         self.dt_edit.setDateTime(default_dt.replace(second=0, microsecond=0))
-        self._repeat_start_label = QLabel("开始执行重复")
+        self._repeat_start_label = QLabel("开始重复执行")
+        # Reserve the width of the longest text so toggling 每日重复 does
+        # not shift the label or the dialog.
+        self._repeat_start_label.setMinimumWidth(
+            self._repeat_start_label.fontMetrics().horizontalAdvance("开始重复执行") + 8
+        )
         dt_row = QHBoxLayout()
         dt_row.setSpacing(6)
         dt_row.addWidget(self.dt_edit)
         dt_row.addWidget(self._repeat_start_label)
         dt_row.addStretch(1)
+        dt_page = QWidget()
+        dt_page.setLayout(dt_row)
+        delay_page = QWidget()
+        delay_page.setLayout(delay_row)
+
+        # Fixed-position swap area: QStackedWidget keeps the size of the
+        # larger page, so 命令内容 below never moves when toggling 定时.
+        self.stack = QStackedWidget()
+        self.stack.addWidget(delay_page)  # index 0: 定时 off
+        self.stack.addWidget(dt_page)     # index 1: 定时 on
 
         # --- command ---
         self.cmd_edit = QLineEdit()
@@ -139,8 +150,7 @@ class TaskEditDialog(QDialog):
         switch_row.addWidget(self.repeat_check)
         switch_row.addStretch(1)
         layout.addLayout(switch_row)
-        layout.addLayout(delay_row)
-        layout.addLayout(dt_row)
+        layout.addWidget(self.stack)
         layout.addWidget(QLabel("命令内容"))
         layout.addWidget(self.cmd_edit)
         btn_row = QHBoxLayout()
@@ -187,11 +197,10 @@ class TaskEditDialog(QDialog):
     def _sync_visibility(self) -> None:
         timed = self.timed_check.isChecked()
         self.repeat_check.setText("每日重复" if timed else "循环执行")
-        for w in self._delay_row_widgets:
-            w.setVisible(not timed)
-        self.dt_edit.setVisible(timed)
-        # "开始执行重复" only when 定时 + 每日重复 are both on
-        self._repeat_start_label.setVisible(timed and self.repeat_check.isChecked())
+        self.stack.setCurrentIndex(1 if timed else 0)
+        self._repeat_start_label.setText(
+            "开始重复执行" if self.repeat_check.isChecked() else "开始执行"
+        )
 
     def _total_seconds(self) -> int:
         return self.h_spin.value() * 3600 + self.m_spin.value() * 60 + self.s_spin.value()
