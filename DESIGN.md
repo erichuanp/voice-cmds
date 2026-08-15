@@ -193,8 +193,9 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 | 下一首 / 上一首 | VK_MEDIA_NEXT_TRACK / PREV_TRACK | ✅ |
 | 关闭当前窗口 | 前台窗口发 WM_CLOSE | ✅ |
 | 最小化全部 | Shell.Application MinimizeAll | ✅ |
-| 打开资源管理器 | `explorer.exe` | ✅ |
 | 清空回收站 | `SHEmptyRecycleBin` | ✅ |
+
+> 「打开资源管理器」不再是内置命令——它作为**默认自带的「打开<触发词>」条目**存在于 `config/apps.json`（触发词 `资源管理器`，路径 `C:\Windows\explorer.exe`，无附加参数）。
 
 > **如果某条实现遇阻**：先注册触发词入口，但执行体替换为「占位提示音」（播 `assets/success.wav`）+ 日志记录 "TODO"，不阻塞整体上线。
 

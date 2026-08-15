@@ -284,8 +284,9 @@ class CommandMatcher:
                 return r
             # The 打开 prefix is part of the trigger intent: after the app
             # path fails, only triggers that themselves start with 打开
-            # (e.g. the built-in 打开资源管理器) stay eligible — a bare
-            # custom trigger like "code" must not answer to "打开 code".
+            # (e.g. a user-defined custom trigger like 打开空调) stay
+            # eligible — a bare custom trigger like "code" must not answer
+            # to "打开 code".
             return self._match_open_prefixed(text)
 
         # 1. Timed task pattern: "<时间>后<命令>" — e.g. "三小时后打开资源管理器",

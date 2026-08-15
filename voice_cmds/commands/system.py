@@ -24,7 +24,6 @@ SYSTEM_COMMANDS: list[tuple[str, str]] = [
     ("上一首", "media_prev"),
     ("关闭当前窗口", "close_window"),
     ("最小化全部", "minimize_all"),
-    ("打开资源管理器", "open_explorer"),
     ("清空回收站", "empty_recycle_bin"),
 ]
 
@@ -118,10 +117,6 @@ def minimize_all(config, logger):
     import win32com.client
     win32com.client.Dispatch("Shell.Application").MinimizeAll()
     logger.info("Shell.MinimizeAll")
-
-
-def open_explorer(config, logger):
-    _run(["explorer.exe"], logger)
 
 
 def empty_recycle_bin(config, logger):

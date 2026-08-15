@@ -1,6 +1,11 @@
 [
   {
     "args": [],
+    "path": "C:\\Windows\\explorer.exe",
+    "trigger": "资源管理器"
+  },
+  {
+    "args": [],
     "path": "C:\\Program Files\\Microsoft VS Code\\Code.exe",
     "trigger": "code"
   }
