@@ -50,7 +50,7 @@ datas += [
     ("config/apps.json", "config"),
     ("config/commands.json", "config"),
     ("config/tasks.json", "config"),
-    ("scripts/del_des_png.bat", "scripts"),
+    ("scripts/.keep", "scripts"),
     ("README.md", "."),
     ("DESIGN.md", "."),
 ]
@@ -129,7 +129,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon="assets/app.ico",
 )
 
 coll = COLLECT(

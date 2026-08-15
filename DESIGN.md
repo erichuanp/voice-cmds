@@ -21,7 +21,7 @@
 | 包管理 | **conda**（env: `voice-cmds`） | 用户指定 |
 | UI | PySide6 (Qt 6) | 原生圆角/阴影/动画/半透明 |
 | STT | sherpa-onnx `streaming-zipformer-bilingual-zh-en` | 中英双语流式，ONNX，5080 上 RTF < 0.05 |
-| Embedding | `Xenova/bge-small-zh-v1.5`（ONNX，onnxruntime + tokenizers） | 直接 ONNX 推理，CLS 池化 + L2 归一化与 torch 版逐条一致（cosine = 1.0）；省掉 torch ~700MB 打包体积 |
+| Embedding | `Xenova/bge-small-zh-v1.5`（ONNX，onnxruntime + tokenizers） | 直接 ONNX 推理，CLS 池化 + L2 归一化与 torch 版逐条一致（cosine = 1.0）；省掉 torch ~700MB 打包体积。下载链：huggingface.co → modelscope.cn → hf-mirror.com |
 | 音频 | `sounddevice` | 16kHz mono |
 | 热键 | `keyboard` | 全局；同进程内可区分左右 Ctrl/Alt 但默认按键已改 |
 | Win32 | `pywin32` | 系统命令（LockWorkStation 等）+ DwmSetWindowAttribute 通过 ctypes 调用 |
@@ -61,7 +61,7 @@ voice-cmds/
 │       ├── settings.py       ← 设置窗口
 │       └── tasks.py          ← 定时任务列表 + 添加/编辑窗口
 ├── scripts/                  ← 用户自定义 .bat / .ps1
-│   └── del_des_png.bat       ← 示例（"吃饭" → 删桌面 png）
+│   └── .keep                  ← 占位（用户脚本放这里）
 ├── config/
 │   ├── settings.json         ← 全局设置
 │   ├── apps.json             ← "打开 XX" 触发词→路径
@@ -243,7 +243,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 // config/apps.json
 [{"trigger": "code;vs", "path": "C:\\...\\Code.exe", "args": []}]
 // config/commands.json
-[{"trigger": "吃饭", "script": "scripts/del_des_png.bat", "args": []}]
+[{"trigger": "吃饭", "script": "scripts/我的脚本.bat", "args": []}]
 ```
 
 ---
@@ -345,5 +345,5 @@ dependencies:
 - [ ] 识别历史窗口（最近 50 条）
 - [ ] 设置窗口"其他设置项"区域（占位）
 - [ ] 多语言 UI（目前中文）
-- [ ] 卸载脚本
+- [x] ~~卸载脚本~~（0.5.2：Inno Setup 卸载器，清理自启动与运行数据）
 - [ ] 提示音 wav 尚未打包进发布产物

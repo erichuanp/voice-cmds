@@ -21,7 +21,13 @@ logger = logging.getLogger("voice_cmds.embedder")
 
 EMBED_DIR_NAME = "bge-small-zh-v1.5"
 EMBED_REPO = "Xenova/bge-small-zh-v1.5"
-EMBED_HOSTS = ("https://huggingface.co", "https://hf-mirror.com")
+# Official HF first, then ModelScope (proxies this HF repo — CN-friendly),
+# then hf-mirror.com as the final fallback.
+EMBED_HOSTS = (
+    "https://huggingface.co",
+    "https://modelscope.cn",
+    "https://hf-mirror.com",
+)
 EMBED_FILES = ("onnx/model.onnx", "tokenizer.json")
 
 StatusCB = Optional[Callable[[str], None]]

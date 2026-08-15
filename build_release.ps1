@@ -1,9 +1,10 @@
-# build_release.ps1 [-Version "0.0.2"] [-DistDir "dist4"]
+# build_release.ps1 [-Version "0.5.2"] [-DistDir "dist"]
 # Packages <DistDir>/voice-cmds/ into:
-#   release/voice-cmds-v<Version>-portable.zip
-#   release/voice-cmds-Setup-v<Version>.exe   (7-Zip SFX self-extractor)
+#   release/voice-cmds-v<Version>-portable.zip   (7-Zip)
+#   release/voice-cmds-Setup-v<Version>.exe      (Inno Setup — mature wizard,
+#     per-user install, desktop shortcut, uninstaller)
 param(
-    [string]$Version = "0.0.2",
+    [string]$Version = "0.5.2",
     [string]$DistDir = "dist"
 )
 
@@ -13,16 +14,16 @@ $Root    = $PSScriptRoot
 $Dist    = Join-Path $Root "$DistDir\voice-cmds"
 $Out     = Join-Path $Root "release"
 $Zip     = Join-Path $Out "voice-cmds-v$Version-portable.zip"
-$Sfx7z   = Join-Path $Out "voice-cmds-Setup-v$Version.exe"
 $Sevenz  = "C:\Program Files\7-Zip\7z.exe"
-$SfxMod  = "C:\Program Files\7-Zip\7z.sfx"
+$Iscc    = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
 if (!(Test-Path $Dist))   { throw "Build output missing: $Dist (run pyinstaller first)" }
 if (!(Test-Path $Sevenz)) { throw "7-Zip not found at $Sevenz" }
+if (!(Test-Path $Iscc))   { throw "Inno Setup not found at $Iscc" }
 if (!(Test-Path $Out))    { New-Item -ItemType Directory -Path $Out | Out-Null }
 
 # 1) Portable zip
-Write-Host "[1/2] Building portable zip..."
+Write-Host "[1/3] Building portable zip..."
 if (Test-Path $Zip) { Remove-Item $Zip -Force }
 Push-Location (Split-Path $Dist -Parent)
 try {
@@ -33,44 +34,12 @@ try {
 $ZipSize = (Get-Item $Zip).Length / 1MB
 Write-Host ("    -> {0}  ({1:N1} MB)" -f $Zip, $ZipSize)
 
-# 2) Self-extracting installer
-Write-Host "[2/2] Building self-extracting installer..."
-$TmpArchive = Join-Path $env:TEMP "voice-cmds-payload-$Version.7z"
-if (Test-Path $TmpArchive) { Remove-Item $TmpArchive -Force }
-Push-Location (Split-Path $Dist -Parent)
-try {
-    & $Sevenz a -t7z -mx=9 -ms=on $TmpArchive "voice-cmds" | Out-Null
-} finally {
-    Pop-Location
-}
+# 2) Inno Setup installer (mature wizard, per-user, uninstaller included)
+Write-Host "[2/3] Building installer (Inno Setup)..."
+& $Iscc "/DAppVersion=$Version" (Join-Path $Root "installer.iss") | Out-Null
+$Setup = Join-Path $Out "voice-cmds-Setup-v$Version.exe"
+if (!(Test-Path $Setup)) { throw "Inno Setup failed — no $Setup produced" }
+$SetupSize = (Get-Item $Setup).Length / 1MB
+Write-Host ("    -> {0}  ({1:N1} MB)" -f $Setup, $SetupSize)
 
-$SfxConfig = Join-Path $env:TEMP "sfx-config-$Version.txt"
-# InstallPath defaults to %LOCALAPPDATA%\Programs\voice-cmds — user-writable,
-# so the SFX doesn't need admin elevation. User can still pick a different
-# folder in the dialog, but we steer them away from Program Files.
-@"
-;!@Install@!UTF-8!
-Title="voice-cmds v$Version Setup"
-BeginPrompt="Install voice-cmds v$Version? Default location is your user Programs folder (no admin needed)."
-ExtractPathText="Install location (must be user-writable — avoid Program Files)"
-ExtractPathTitle="voice-cmds v$Version"
-GUIMode="1"
-OverwriteMode="2"
-InstallPath="%LOCALAPPDATA%\\Programs\\voice-cmds"
-Shortcut="Du,{voice-cmds\voice-cmds.exe},{voice-cmds.exe},{},{voice-cmds},{voice-cmds},{0}"
-Shortcut="Pu,{voice-cmds\voice-cmds.exe},{voice-cmds.exe},{},{voice-cmds},{voice-cmds},{0}"
-RunProgram="voice-cmds\voice-cmds.exe"
-;!@InstallEnd@!
-"@ | Set-Content -Encoding UTF8 -Path $SfxConfig
-
-if (Test-Path $Sfx7z) { Remove-Item $Sfx7z -Force }
-cmd /c "copy /b ""$SfxMod"" + ""$SfxConfig"" + ""$TmpArchive"" ""$Sfx7z""" | Out-Null
-Remove-Item $TmpArchive -Force
-Remove-Item $SfxConfig -Force
-
-$SfxSize = (Get-Item $Sfx7z).Length / 1MB
-Write-Host ("    -> {0}  ({1:N1} MB)" -f $Sfx7z, $SfxSize)
-
-Write-Host ""
-Write-Host "Done. Artifacts in: $Out"
-Get-ChildItem $Out | Format-Table Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}} -AutoSize
+Write-Host "[3/3] Done. Artifacts in: $Out"

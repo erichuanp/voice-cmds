@@ -10,7 +10,7 @@ Windows 11 voice command tool — press a hotkey, speak a short command, watch a
 
 Download the latest installer from **[Releases](https://github.com/erichuanp/voice-cmds/releases)**:
 
-- `voice-cmds-Setup-v0.0.1.exe` — installs to `%LOCALAPPDATA%\Programs\voice-cmds\`, optional autostart, no admin needed.
+- `voice-cmds-Setup-vX.Y.Z.exe` — Inno Setup 向导：默认装到 `%LOCALAPPDATA%\Programs\voice-cmds\`，**全程无需管理员权限**；可选桌面快捷方式与开机自启；自带卸载器（开始菜单 / 添加或删除程序），卸载时同时清理开机自启和运行数据（models/logs/config/scripts）。
 
 On first launch the app downloads ~375MB of models (STT 280MB + embedder ONNX 95MB) into `models/` next to the exe. Subsequent launches start in seconds.
 
