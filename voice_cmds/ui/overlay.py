@@ -1,4 +1,4 @@
-"""Floating recording overlay: circle → capsule → processing → success/error.
+"""Floating recording overlay: circle → capsule → processing → result text → success/error.
 
 Frameless, translucent, non-activating. Manually painted soft shadow simulates
 Win11 elevation without QGraphicsDropShadowEffect (which causes
@@ -45,6 +45,7 @@ class State(Enum):
     HIDDEN = auto()
     RECORDING = auto()
     PROCESSING = auto()
+    RESULT = auto()  # recognized text shown for ~1s before the ✓/✗ circle
     SUCCESS = auto()
     ERROR = auto()
 
@@ -117,6 +118,7 @@ class OverlayWindow(QWidget):
         self._capsule_width: int = self.diameter
         self._state: State = State.HIDDEN
         self._text: str = ""
+        self._result_ok: bool = True
         self._spinner_angle_deg: float = 0.0
 
         super().__init__(None)
@@ -218,6 +220,20 @@ class OverlayWindow(QWidget):
             self._spinner_timer.start()
         self.update()
 
+    def show_result_text(self, text: str, ok: bool) -> None:
+        """Show the recognized text for ~1s before the ✓/✗ circle.
+
+        Green = matched & executed; red = no match / execution failure —
+        so the user can see what was actually recognized.
+        """
+        self._state = State.RESULT
+        self._result_ok = ok
+        self._text = text
+        self._spinner_timer.stop()
+        self._auto_hide_timer.stop()
+        self._animate_width(self._target_capsule_width(text))
+        self.update()
+
     def show_success(self) -> None:
         self._state = State.SUCCESS
         self._spinner_timer.stop()
@@ -304,13 +320,16 @@ class OverlayWindow(QWidget):
             p.fillPath(path, QColor(0, 0, 0, alpha))
 
         # Capsule body
-        color = self.color_error if self._state == State.ERROR else self.color_idle
+        failed = self._state == State.ERROR or (
+            self._state == State.RESULT and not self._result_ok
+        )
+        color = self.color_error if failed else self.color_idle
         body = QPainterPath()
         body.addRoundedRect(capsule_rect, self.diameter / 2.0, self.diameter / 2.0)
         p.fillPath(body, color)
 
         # Foreground content
-        if self._state == State.RECORDING and self._text:
+        if self._text and self._state in (State.RECORDING, State.RESULT):
             p.setPen(Qt.white)
             p.setFont(QFont("Microsoft YaHei UI", self.font_pt))
             text_rect = capsule_rect.adjusted(12, 0, -12, 0).toRect()

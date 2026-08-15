@@ -7,8 +7,11 @@ Build with:
 
 Output: dist/voice-cmds/voice-cmds.exe (+ _internal/ with deps)
 
-Models (STT ~511MB + embedder ~96MB) are NOT bundled — they download to
+Models (STT ~280MB + embedder ONNX ~95MB) are NOT bundled — they download to
 ./models/ next to the exe on first run.
+
+The embedder runs through onnxruntime + tokenizers (no torch), which cuts
+~700 MB out of the frozen bundle vs the old sentence-transformers stack.
 """
 from PyInstaller.utils.hooks import (
     collect_dynamic_libs,
@@ -19,11 +22,8 @@ from PyInstaller.utils.hooks import (
 # Heavy deps that PyInstaller's auto-detection misses bits of
 hidden_imports = []
 hidden_imports += collect_submodules("sherpa_onnx")
-hidden_imports += collect_submodules("sentence_transformers")
-hidden_imports += collect_submodules("transformers")
 hidden_imports += collect_submodules("tokenizers")
-hidden_imports += collect_submodules("huggingface_hub")
-hidden_imports += collect_submodules("safetensors")
+hidden_imports += collect_submodules("pypinyin")
 hidden_imports += [
     "sounddevice",
     "soundfile",
@@ -35,17 +35,14 @@ hidden_imports += [
     "PySide6.QtNetwork",
 ]
 
-# Native runtime DLLs for sherpa-onnx + onnxruntime
+# Native runtime DLLs for sherpa-onnx + onnxruntime + tokenizers
 binaries = []
 binaries += collect_dynamic_libs("sherpa_onnx")
 binaries += collect_dynamic_libs("onnxruntime")
-binaries += collect_dynamic_libs("torch")
 binaries += collect_dynamic_libs("tokenizers")
 
-# Data files for transformers / sentence_transformers (vocab files etc)
+# Data files for sherpa-onnx
 datas = []
-datas += collect_data_files("sentence_transformers", include_py_files=False)
-datas += collect_data_files("transformers", include_py_files=False)
 datas += collect_data_files("sherpa_onnx", include_py_files=False)
 # Bundle default config + sample script so first-run is functional
 datas += [
@@ -68,17 +65,27 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Reduce bloat — these are pulled in transitively but unused.
-        # Do NOT exclude stdlib modules (unittest, test, doctest, pydoc) —
-        # torch.utils._config_module / transformers / others import them
-        # at runtime and the app crashes on first embedder load.
+        # Reduce bloat. onnxruntime's optional training modules statically
+        # reference torch/transformers/sklearn/scipy (modulegraph records the
+        # try/except imports even though they never execute) — excluding them
+        # is safe because the app only uses onnxruntime's CPU inference.
         "matplotlib",
         "tkinter",
         "notebook",
         "IPython",
         "jupyter",
+        "torch",
         "torchvision",
         "torchaudio",
+        "torchtext",
+        "torchao",
+        "transformers",
+        "sentence_transformers",
+        "safetensors",
+        "huggingface_hub",
+        "hf_xet",
+        "sklearn",
+        "scipy",
     ],
     noarchive=False,
     optimize=0,

@@ -34,8 +34,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "stop": "right alt",
         "cancel": "esc",
     },
-    "stop_mode": "hotkey",
-    "vad_silence_ms": 1000,
+    "stop_mode": "vad",
+    "vad_silence_ms": 500,
     "max_chars": 15,
     "shutdown_delay_seconds": 15,
     "ui": {
@@ -46,9 +46,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "circle_diameter_px": 26,
         "shadow_margin_px": 8,
         "font_size_pt": 7,
+        "result_text_ms": 1000,
     },
     "match": {
         "embedding_similarity_threshold": 0.85,
+        "pinyin_similarity_threshold": 0.88,
     },
     "sound": {
         "success_enabled": True,

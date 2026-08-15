@@ -20,6 +20,7 @@ def _generate_icon(color: str = "#00C853") -> QIcon:
 
 class TrayIcon(QObject):
     settings_requested = Signal()
+    help_requested = Signal()
     reload_requested = Signal()
     exit_requested = Signal()
 
@@ -29,14 +30,24 @@ class TrayIcon(QObject):
         self.tray.setToolTip("voice-cmds")
         menu = QMenu()
         act_settings = QAction("设置", menu)
+        act_help = QAction("帮助", menu)
         act_reload = QAction("重新加载配置", menu)
         act_exit = QAction("退出", menu)
         act_settings.triggered.connect(self.settings_requested.emit)
+        act_help.triggered.connect(self.help_requested.emit)
         act_reload.triggered.connect(self.reload_requested.emit)
         act_exit.triggered.connect(self.exit_requested.emit)
         menu.addAction(act_settings)
+        menu.addAction(act_help)
         menu.addAction(act_reload)
         menu.addSeparator()
         menu.addAction(act_exit)
         self.tray.setContextMenu(menu)
         self.tray.show()
+
+    def notify(self, title: str, message: str, msecs: int = 5000) -> None:
+        """Balloon notification from the tray icon."""
+        try:
+            self.tray.showMessage(title, message, QSystemTrayIcon.Information, msecs)
+        except Exception:
+            pass

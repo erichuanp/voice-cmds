@@ -8,16 +8,15 @@ clean fallback path.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
 
 import numpy as np
-import requests
 
 from .audio import SAMPLE_RATE
 from .config import MODELS_DIR
+from .fetch import download_with_mirror_fallback
 
 logger = logging.getLogger("voice_cmds.stt")
 
@@ -40,85 +39,6 @@ StatusCB = Optional[Callable[[str], None]]
 ProgressCB = Optional[Callable[[int, int], None]]
 
 
-def _hf_url(host: str, repo: str, filename: str) -> str:
-    return f"{host}/{repo}/resolve/main/{filename}"
-
-
-def _download_one(
-    url: str,
-    dest: Path,
-    label: str = "",
-    status_cb: StatusCB = None,
-    progress_cb: ProgressCB = None,
-    max_attempts: int = 3,
-) -> None:
-    """Download a single file with retry + backoff. Raises on final failure."""
-    backoff = 2.0
-    last_err: Exception | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            logger.info("Downloading [%d/%d] %s -> %s", attempt, max_attempts, url, dest)
-            with requests.get(url, stream=True, timeout=(15, 60)) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", 0))
-                downloaded = 0
-                if progress_cb:
-                    progress_cb(0, total)
-                with dest.open("wb") as f:
-                    for chunk in r.iter_content(chunk_size=1 << 16):
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_cb:
-                            progress_cb(downloaded, total)
-                # Sanity: if Content-Length present, downloaded must match
-                if total and downloaded != total:
-                    raise IOError(
-                        f"Short read: got {downloaded} of {total} bytes for {label or dest.name}"
-                    )
-            return  # success
-        except Exception as e:
-            last_err = e
-            logger.warning("Attempt %d failed for %s: %s", attempt, label or dest.name, e)
-            if dest.exists():
-                try:
-                    dest.unlink()
-                except OSError:
-                    pass
-            if attempt < max_attempts:
-                wait = backoff ** (attempt - 1)
-                if status_cb:
-                    status_cb(f"下载失败，{wait:.0f}s 后重试 ({attempt}/{max_attempts})…")
-                time.sleep(wait)
-    assert last_err is not None
-    raise last_err
-
-
-def _download_with_mirror_fallback(
-    filename: str,
-    dest: Path,
-    status_cb: StatusCB = None,
-    progress_cb: ProgressCB = None,
-) -> None:
-    """Try each HF host in order; raise if all fail."""
-    last_err: Exception | None = None
-    for host in HF_HOSTS:
-        url = _hf_url(host, HF_REPO, filename)
-        host_short = host.replace("https://", "")
-        if status_cb:
-            status_cb(f"正在下载 {filename} (来源: {host_short})…")
-        try:
-            _download_one(url, dest, label=filename, status_cb=status_cb, progress_cb=progress_cb)
-            return
-        except Exception as e:
-            last_err = e
-            logger.warning("Host %s exhausted for %s; trying next mirror", host, filename)
-            continue
-    assert last_err is not None
-    raise last_err
-
-
 def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> Path:
     """Return the directory containing the model files; download missing ones."""
     model_dir = MODELS_DIR / MODEL_NAME
@@ -133,7 +53,9 @@ def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> 
         dst = model_dir / filename
         if dst.exists() and dst.stat().st_size > 0:
             continue
-        _download_with_mirror_fallback(filename, dst, status_cb=status_cb, progress_cb=progress_cb)
+        download_with_mirror_fallback(
+            HF_REPO, filename, dst, HF_HOSTS, status_cb=status_cb, progress_cb=progress_cb
+        )
     return model_dir
 
 

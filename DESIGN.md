@@ -21,7 +21,7 @@
 | 包管理 | **conda**（env: `voice-cmds`） | 用户指定 |
 | UI | PySide6 (Qt 6) | 原生圆角/阴影/动画/半透明 |
 | STT | sherpa-onnx `streaming-zipformer-bilingual-zh-en` | 中英双语流式，ONNX，5080 上 RTF < 0.05 |
-| Embedding | `BAAI/bge-small-zh-v1.5` (sentence-transformers) | 中文小模型 SOTA，启动时预编码所有 trigger |
+| Embedding | `Xenova/bge-small-zh-v1.5`（ONNX，onnxruntime + tokenizers） | 直接 ONNX 推理，CLS 池化 + L2 归一化与 torch 版逐条一致（cosine = 1.0）；省掉 torch ~700MB 打包体积 |
 | 音频 | `sounddevice` | 16kHz mono |
 | 热键 | `keyboard` | 全局；同进程内可区分左右 Ctrl/Alt 但默认按键已改 |
 | Win32 | `pywin32` | 系统命令（LockWorkStation 等）+ DwmSetWindowAttribute 通过 ctypes 调用 |
@@ -78,6 +78,7 @@ voice-cmds/
 ## 4. 交互流程
 
 ### 4.1 热键
+
 | 动作 | 按键 | 触发条件 |
 |---|---|---|
 | 启动录音 | **左 Ctrl + 右 Alt** | 全局 |
@@ -85,7 +86,12 @@ voice-cmds/
 | 取消（不识别不执行） | **Esc** | 仅在录音中 |
 
 > 单按 RAlt 仅在录音中拦截；非录音状态完全透传，不影响正常输入。
-> 设置中可选「停止模式」：`hotkey`（默认） / `vad`（1 秒静音自动停止）。
+> **停止模式**（设置 → 通用）：`vad`（默认）/ `hotkey`。
+> - `vad`：识别到文字后静音 ≥ `vad_silence_ms`（默认 500ms，≥200ms）自动结束识别；
+> - `hotkey`：仅按停止键结束识别；
+> - 结束识别后先展示识别结果 `result_text_ms`（默认 1000ms，≥0），**展示结束才执行命令**；
+> - **两种模式下右 Alt / Esc 始终有效**。
+> VAD 为自适应能量检测：静音判定阈值 = max(0.012, 3 × 环境底噪)，底噪按 EMA 缓慢跟踪；未识别到任何文字前不会自动停止。
 
 ### 4.2 浮窗状态机
 
@@ -97,10 +103,13 @@ voice-cmds/
    │ 收到 partial（>0 字）
    ▼
 [Recording-Capsule 高80 宽自适应 绿]  ←── 文字流式追加
-   │ 停止键 / VAD / 达到 15 字
+   │ 停止键 / VAD 静音 0.5s / 达到 15 字
    ▼
 [Processing 胶囊 + Loading 蒙层]
    │ 处理完成
+   ▼
+[Result 胶囊 + 识别文本]  ←── 绿=匹配成功 / 红=未匹配或失败，停留 result_text_ms（默认 1000ms）
+   │ 展示结束后（此时才执行命令）
    ├──── 成功 ───▶ [Done-Success 圆形 + ✔ 绿] ─ 2s ─▶ [Hidden]
    ├──── 失败 ───▶ [Done-Error   圆形 + ✗ 红] ─ 2s ─▶ [Hidden]
    └──── Esc 取消 ────────────────────────────────▶ [Hidden]
@@ -149,13 +158,15 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 ## 6. 命令匹配
 
-两层（按顺序）：
+三层（按顺序，全部在 `matcher.py`）：
 
 1. **字面完全匹配** → 命中即执行
-2. **Embedding 兜底**：BGE-small-zh-v1.5 编码触发词集 + 输入，余弦相似度 > 阈值（默认 0.85）命中
+2. **拼音+声调 embedding**：文本先转 `拼音+声调`（`清空回收站 → qing1kong1hui2shou1zhan4`）再编码，余弦相似度 ≥ `pinyin_similarity_threshold`（默认 **0.88**）命中。STT 同音误识别因此能以极高相似度命中（“晴空挥手站 → qing2kong1hui1shou3zhan4”，sim ≈ 0.99；“锁屏/所评”sim = 1.0）
+3. **原文 embedding 兜底**：≥ `embedding_similarity_threshold`（默认 0.85）命中，覆盖与读音无关的语义变体
 
-> 所有触发词在 `CommandMatcher._rebuild()` 时一次性预编码缓存（启动时完成），dispatch 时只需对单条输入做一次 encode + matmul。
-> 模型在 splash 阶段同步预加载（无懒加载）。
+> 所有触发词（系统+自定义+应用）在启动时预编码 **两套** 向量（拼音版 + 原文版），dispatch 时只需对单条输入做两次 encode + matmul。
+> 拼音层阈值单独提高是因为无关拼音串的基线相似度约 0.7–0.8，必须与“原文层”阈值分开。
+> “打开 X”路径只在与 X 相关的应用触发词里匹配（字面 → 拼音 → 原文）。
 > 无命中 → 失败状态 + debug 日志记录原文 + 最佳分数。
 
 ---
@@ -180,7 +191,9 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 | 最小化全部 | Shell.Application MinimizeAll | ✅ |
 | 打开资源管理器 | `explorer.exe` | ✅ |
 | 清空回收站 | `SHEmptyRecycleBin` | ✅ |
+| 定时关机（`<N>分钟后关机`） | `shutdown /s /t <N*60>`；支持阿拉伯/中文数字与「半小时」 | ✅ |
 
+> 模式：`^(\d+|[零一二两三四五六七八九十半百]+)个?(分钟|小时|钟头)后?再?关机$`，上限 24 小时。
 > **如果某条实现遇阻**：先注册触发词入口，但执行体替换为「占位提示音」（播 `assets/success.wav`）+ 日志记录 "TODO"，不阻塞整体上线。
 
 ### 7.2 用户自定义命令（`config/commands.json`）
@@ -215,12 +228,12 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 ```json
 {
   "hotkey": {
-    "start": "ctrl+right alt",
+    "start": "left ctrl+right alt",
     "stop": "right alt",
     "cancel": "esc"
   },
-  "stop_mode": "hotkey",
-  "vad_silence_ms": 1000,
+  "stop_mode": "vad",
+  "vad_silence_ms": 500,
   "max_chars": 15,
   "shutdown_delay_seconds": 15,
   "ui": {
@@ -228,11 +241,12 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
     "color_error": "#E53935",
     "bottom_offset_px": 20,
     "max_capsule_width_px": 600,
-    "circle_diameter_px": 80
+    "circle_diameter_px": 80,
+    "result_text_ms": 1000
   },
   "match": {
-    "pinyin_distance_threshold": 2,
-    "embedding_similarity_threshold": 0.85
+    "embedding_similarity_threshold": 0.85,
+    "pinyin_similarity_threshold": 0.88
   },
   "sound": {
     "success_enabled": true,
@@ -244,11 +258,15 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 ### 8.2 设置窗口（暴露的项）
 
 - 修改三组热键
-- 切换停止模式（hotkey / vad）+ VAD 静音阈值
+- **停止模式**（hotkey / vad）+ VAD 静音时长（默认 500ms，范围 200–5000ms）
+- **识别结果展示时长**（默认 1000ms，范围 0–10000ms；0 = 识别后立即执行）
 - 自定义命令 CRUD（`commands.json`）
 - 「打开」映射 CRUD（`apps.json`）
 - 提示音开关
+- 开机自启动（debug 模式锁定）
 - _未来扩展项位置_：用户提到"还在想"，预留菜单项
+
+托盘菜单：**设置 / 帮助 / 重新加载配置 / 退出**。「帮助」弹窗列出全部内置命令、定时关机语法与「打开 X」可用触发词。
 
 ---
 
@@ -278,25 +296,29 @@ dependencies:
   - pip:
       - PySide6>=6.6
       - sounddevice
+      - soundfile
+      - numpy
       - sherpa-onnx
       - onnxruntime-gpu>=1.20  # CPU 用户可换 onnxruntime
-      - pypinyin
-      - python-Levenshtein
-      - sentence-transformers
+      - tokenizers            # ONNX embedder 分词
+      - pypinyin              # 拼音+声调匹配层
       - keyboard
       - pywin32
-      - numpy
-      - soundfile
+      - requests
+      - tqdm
 ```
 
 ---
 
 ## 11. 待定 / 未来 TODO
 
+- [x] ~~VAD 自动停止~~（0.1.0：静音 0.5s，设置可切换 hotkey/vad）
+- [x] ~~开机自启注册~~（设置 → 通用）
+- [x] ~~embedder 换直接 ONNX~~（0.1.0：onnxruntime + tokenizers，CLS 池化与 torch 逐条一致）
+- [x] ~~托盘「帮助」菜单~~（0.1.0）
 - [ ] 自定义提示音文件路径（替换默认 wav）
 - [ ] 识别历史窗口（最近 50 条）
-- [ ] `hot_words.json` 固定纠错表（用户高频误识）
 - [ ] 设置窗口"其他设置项"区域（占位）
-- [ ] 开机自启注册
 - [ ] 多语言 UI（目前中文）
 - [ ] 卸载脚本
+- [ ] 提示音 wav 尚未打包进发布产物

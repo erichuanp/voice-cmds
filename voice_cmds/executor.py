@@ -23,7 +23,13 @@ class CommandExecutor:
             spec.trigger, spec.kind, result.layer, result.score, result.arg,
         )
         if spec.kind == "system":
-            system_module.dispatch(spec.payload["fn"], self.config, self.logger)
+            extra = spec.payload.get("seconds")
+            if extra is not None:
+                system_module.dispatch(
+                    spec.payload["fn"], self.config, self.logger, extra
+                )
+            else:
+                system_module.dispatch(spec.payload["fn"], self.config, self.logger)
         elif spec.kind == "app":
             apps_module.open_app(spec.payload, self.logger)
         elif spec.kind == "custom":

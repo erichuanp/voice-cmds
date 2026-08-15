@@ -10,8 +10,9 @@ dependencies:
       - soundfile
       - numpy
       - sherpa-onnx
-      - onnxruntime-gpu>=1.20
-      - sentence-transformers
+      - onnxruntime            # CPU-only: embedder runs CPU inference
+      - tokenizers
+      - pypinyin
       - keyboard
       - pywin32
       - requests

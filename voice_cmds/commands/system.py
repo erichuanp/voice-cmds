@@ -48,6 +48,12 @@ def shutdown(config, logger):
     _run(["shutdown", "/s", "/t", str(delay)], logger)
 
 
+def delayed_shutdown(config, logger, seconds: int):
+    """'X分钟后关机' — pattern-matched timed shutdown."""
+    seconds = max(1, int(seconds))
+    _run(["shutdown", "/s", "/t", str(seconds)], logger)
+
+
 def restart(config, logger):
     delay = config.settings["shutdown_delay_seconds"]
     _run(["shutdown", "/r", "/t", str(delay)], logger)
@@ -124,8 +130,8 @@ def empty_recycle_bin(config, logger):
     logger.info("SHEmptyRecycleBin -> %s", res)
 
 
-def dispatch(fn_name: str, config, logger) -> None:
+def dispatch(fn_name: str, config, logger, *extra) -> None:
     fn = globals().get(fn_name)
     if not callable(fn):
         raise RuntimeError(f"Unknown system function: {fn_name}")
-    fn(config, logger)
+    fn(config, logger, *extra)

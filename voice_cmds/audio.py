@@ -17,9 +17,10 @@ CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_MS // 1000
 class MicrophoneStream:
     def __init__(self) -> None:
         self._stream: sd.InputStream | None = None
-        self._on_chunk: Callable[[np.ndarray], None] | None = None
+        # on_chunk receives (samples, rms) — rms lets the app do VAD.
+        self._on_chunk: Callable[[np.ndarray, float], None] | None = None
 
-    def start(self, on_chunk: Callable[[np.ndarray], None]) -> None:
+    def start(self, on_chunk: Callable[[np.ndarray, float], None]) -> None:
         if self._stream is not None:
             return
         self._on_chunk = on_chunk
@@ -48,5 +49,7 @@ class MicrophoneStream:
         if status:
             logger.warning("Audio status: %s", status)
         if self._on_chunk is not None:
-            # Mono -> 1-D array of float32
-            self._on_chunk(indata[:, 0].copy())
+            # Mono -> 1-D array of float32 + frame energy for VAD
+            chunk = indata[:, 0].copy()
+            rms = float(np.sqrt(np.mean(np.square(chunk))))
+            self._on_chunk(chunk, rms)
