@@ -137,6 +137,11 @@ def format_delay(seconds: int) -> str:
     return "".join(parts) or "0秒"
 
 
+def _split_aliases(trigger: str) -> list[str]:
+    """'code;vs' / 'code；vs' -> ['code', 'vs'] (app trigger aliases)."""
+    return [a.strip() for a in re.split(r"[;；]", trigger) if a.strip()]
+
+
 def _parse_timed_command(text: str) -> tuple[int, str] | None:
     """'<时间>后<命令>' -> (delay_seconds, command), or None if not a match.
 
@@ -217,8 +222,12 @@ class CommandMatcher:
                     {"script": entry["script"], "args": entry.get("args", [])},
                 )
             )
-        # Apps
-        self.app_triggers = {entry["trigger"]: entry for entry in self.config.apps}
+        # Apps: trigger may list aliases separated by ';' / '；' —
+        # "code;vs" registers 打开code and 打开vs to the same entry.
+        self.app_triggers = {}
+        for entry in self.config.apps:
+            for alias in _split_aliases(entry.get("trigger", "")):
+                self.app_triggers[alias] = entry
 
         # Pre-encode all triggers (system + custom + apps): toned pinyin + raw
         self._all_trigger_list = [s.trigger for s in self.specs] + list(self.app_triggers)

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -23,83 +24,74 @@ from PySide6.QtWidgets import (
 )
 
 
-class _AppDialog(QDialog):
+class _CommandDialog(QDialog):
+    """Add/edit one entry: either '打开<触发词>' (launch an app) or a plain
+    '触发词' custom command (script or exe). App triggers may list several
+    aliases separated by ';' or '；' — 打开A and 打开B then open the same thing."""
+
     def __init__(self, parent=None, entry: dict | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("打开 — 应用条目")
+        self.setWindowTitle("自定义命令")
         entry = entry or {}
+        self.kind = entry.get("kind", "custom")  # 'app' | 'custom'
+
+        self.radio_app = QRadioButton("打开<触发词>")
+        self.radio_cmd = QRadioButton("触发词")
+        self.radio_app.setChecked(self.kind == "app")
+        self.radio_cmd.setChecked(self.kind != "app")
+
         self.trigger = QLineEdit(entry.get("trigger", ""))
-        self.path = QLineEdit(entry.get("path", ""))
+        self.trigger.setToolTip("“打开”模式支持用 ; 或 ；分隔多个触发词：打开A / 打开B 都打开同一个")
+        self.path = QLineEdit(entry.get("path", entry.get("script", "")))
         self.args = QLineEdit(" ".join(entry.get("args", []) or []))
         browse = QPushButton("浏览…")
         browse.clicked.connect(self._browse)
 
+        kind_row = QHBoxLayout()
+        kind_row.addWidget(self.radio_app)
+        kind_row.addWidget(self.radio_cmd)
+        kind_row.addStretch(1)
+
         form = QFormLayout()
+        form.addRow("类型", kind_row)
         form.addRow("触发词", self.trigger)
         path_row = QHBoxLayout()
         path_row.addWidget(self.path)
         path_row.addWidget(browse)
         path_widget = QWidget()
         path_widget.setLayout(path_row)
-        form.addRow("可执行路径", path_widget)
+        form.addRow("路径", path_widget)
         form.addRow("附加参数（空格分隔）", self.args)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(buttons)
 
     def _browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "选择应用", "", "Executables (*.exe);;All files (*.*)")
+        if self.radio_app.isChecked():
+            path, _ = QFileDialog.getOpenFileName(
+                self, "选择应用", "", "Executables (*.exe);;All files (*.*)"
+            )
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "选择脚本或程序", "",
+                "脚本与程序 (*.bat *.cmd *.ps1 *.py *.exe);;All files (*.*)",
+            )
         if path:
             self.path.setText(path)
 
     def value(self) -> dict:
         args = [a for a in self.args.text().split() if a]
-        return {"trigger": self.trigger.text().strip(), "path": self.path.text().strip(), "args": args}
-
-
-class _CommandDialog(QDialog):
-    def __init__(self, parent=None, entry: dict | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("自定义命令")
-        entry = entry or {}
-        self.trigger = QLineEdit(entry.get("trigger", ""))
-        self.script = QLineEdit(entry.get("script", ""))
-        self.args = QLineEdit(" ".join(entry.get("args", []) or []))
-        browse = QPushButton("浏览…")
-        browse.clicked.connect(self._browse)
-
-        form = QFormLayout()
-        form.addRow("触发词", self.trigger)
-        path_row = QHBoxLayout()
-        path_row.addWidget(self.script)
-        path_row.addWidget(browse)
-        path_widget = QWidget()
-        path_widget.setLayout(path_row)
-        form.addRow("脚本路径（相对项目根）", path_widget)
-        form.addRow("附加参数（空格分隔）", self.args)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-
-    def _browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择脚本", "", "Scripts (*.bat *.cmd *.ps1 *.py);;All files (*.*)"
-        )
-        if path:
-            self.script.setText(path)
-
-    def value(self) -> dict:
-        args = [a for a in self.args.text().split() if a]
-        return {"trigger": self.trigger.text().strip(), "script": self.script.text().strip(), "args": args}
+        kind = "app" if self.radio_app.isChecked() else "custom"
+        v = {"kind": kind, "trigger": self.trigger.text().strip(), "args": args}
+        if kind == "app":
+            v["path"] = self.path.text().strip()
+        else:
+            v["script"] = self.path.text().strip()
+        return v
 
 
 class SettingsDialog(QDialog):
@@ -114,7 +106,6 @@ class SettingsDialog(QDialog):
 
         tabs = QTabWidget()
         tabs.addTab(self._build_general_tab(), "通用")
-        tabs.addTab(self._build_apps_tab(), "打开 (Apps)")
         tabs.addTab(self._build_commands_tab(), "自定义命令")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -197,64 +188,15 @@ class SettingsDialog(QDialog):
         form.addRow(QLabel("<i>保存后程序会自动重启以应用更改。</i>"))
         return w
 
-    # --- Apps tab ---
-    def _build_apps_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        self.app_list = QListWidget()
-        for entry in self.config.apps:
-            self._add_app_item(entry)
-        btns = QHBoxLayout()
-        add = QPushButton("添加新的打开")
-        edit = QPushButton("编辑")
-        rm = QPushButton("删除")
-        add.clicked.connect(self._add_app)
-        edit.clicked.connect(self._edit_app)
-        rm.clicked.connect(self._remove_app)
-        btns.addWidget(add)
-        btns.addWidget(edit)
-        btns.addWidget(rm)
-        btns.addStretch(1)
-        layout.addWidget(self.app_list)
-        layout.addLayout(btns)
-        return w
-
-    def _add_app_item(self, entry: dict) -> None:
-        item = QListWidgetItem(f"{entry['trigger']}  →  {entry['path']}")
-        item.setData(0x100, entry)  # Qt.UserRole == 0x100
-        self.app_list.addItem(item)
-
-    def _add_app(self) -> None:
-        d = _AppDialog(self)
-        if d.exec() == QDialog.Accepted:
-            v = d.value()
-            if not v["trigger"] or not v["path"]:
-                QMessageBox.warning(self, "无效", "触发词和路径都必填。")
-                return
-            self._add_app_item(v)
-
-    def _edit_app(self) -> None:
-        item = self.app_list.currentItem()
-        if not item:
-            return
-        d = _AppDialog(self, entry=item.data(0x100))
-        if d.exec() == QDialog.Accepted:
-            v = d.value()
-            item.setText(f"{v['trigger']}  →  {v['path']}")
-            item.setData(0x100, v)
-
-    def _remove_app(self) -> None:
-        row = self.app_list.currentRow()
-        if row >= 0:
-            self.app_list.takeItem(row)
-
-    # --- Commands tab ---
+    # --- Commands tab (merged: '打开 X' apps + plain custom commands) ---
     def _build_commands_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
         self.cmd_list = QListWidget()
+        for entry in self.config.apps:
+            self._add_cmd_item({**entry, "kind": "app"})
         for entry in self.config.commands:
-            self._add_cmd_item(entry)
+            self._add_cmd_item({**entry, "kind": "custom"})
         btns = QHBoxLayout()
         add = QPushButton("添加")
         edit = QPushButton("编辑")
@@ -270,8 +212,14 @@ class SettingsDialog(QDialog):
         layout.addLayout(btns)
         return w
 
+    @staticmethod
+    def _entry_text(entry: dict) -> str:
+        if entry["kind"] == "app":
+            return f"打开 {entry['trigger']}  →  {entry['path']}"
+        return f"{entry['trigger']}  →  {entry['script']}"
+
     def _add_cmd_item(self, entry: dict) -> None:
-        item = QListWidgetItem(f"{entry['trigger']}  →  {entry['script']}")
+        item = QListWidgetItem(self._entry_text(entry))
         item.setData(0x100, entry)
         self.cmd_list.addItem(item)
 
@@ -279,8 +227,9 @@ class SettingsDialog(QDialog):
         d = _CommandDialog(self)
         if d.exec() == QDialog.Accepted:
             v = d.value()
-            if not v["trigger"] or not v["script"]:
-                QMessageBox.warning(self, "无效", "触发词和脚本路径都必填。")
+            path_key = "path" if v["kind"] == "app" else "script"
+            if not v["trigger"] or not v[path_key]:
+                QMessageBox.warning(self, "无效", "触发词和路径都必填。")
                 return
             self._add_cmd_item(v)
 
@@ -291,7 +240,7 @@ class SettingsDialog(QDialog):
         d = _CommandDialog(self, entry=item.data(0x100))
         if d.exec() == QDialog.Accepted:
             v = d.value()
-            item.setText(f"{v['trigger']}  →  {v['script']}")
+            item.setText(self._entry_text(v))
             item.setData(0x100, v)
 
     def _remove_cmd(self) -> None:
@@ -313,12 +262,23 @@ class SettingsDialog(QDialog):
         s["sound"]["success_enabled"] = self.sound_success.isChecked()
         s["sound"]["error_enabled"] = self.sound_error.isChecked()
 
-        self.config.apps = [
-            self.app_list.item(i).data(0x100) for i in range(self.app_list.count())
-        ]
-        self.config.commands = [
-            self.cmd_list.item(i).data(0x100) for i in range(self.cmd_list.count())
-        ]
+        apps, commands = [], []
+        for i in range(self.cmd_list.count()):
+            entry = self.cmd_list.item(i).data(0x100)
+            if entry["kind"] == "app":
+                apps.append({
+                    "trigger": entry["trigger"],
+                    "path": entry["path"],
+                    "args": entry["args"],
+                })
+            else:
+                commands.append({
+                    "trigger": entry["trigger"],
+                    "script": entry["script"],
+                    "args": entry["args"],
+                })
+        self.config.apps = apps
+        self.config.commands = commands
 
         self.config.save_settings()
         self.config.save_apps()

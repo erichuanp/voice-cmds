@@ -227,7 +227,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 ]
 ```
 
-设置窗口提供 **添加 / 编辑 / 删除**。脚本路径相对项目根目录。
+设置窗口提供 **添加 / 编辑 / 删除**。脚本路径相对项目根目录；路径选择器支持 `.bat / .cmd / .ps1 / .py / .exe`。
 
 ### 7.3 「打开」命令（`config/apps.json`）
 
@@ -235,12 +235,16 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 ```json
 [
-  {"trigger": "code", "path": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", "args": ["."]},
-  {"trigger": "微信", "path": "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe", "args": []}
+  {"trigger": "code;vs", "path": "C:\\...\\Code.exe", "args": ["."]},
+  {"trigger": "微信", "path": "C:\\...\\WeChat.exe", "args": []}
 ]
 ```
 
-设置 UI：「**添加新的打开**」按钮 → 弹窗（触发词 / 路径 / args，路径可文件选择器）。
+- **触发词多别名**：用 `;` 或 `；` 分隔（`code;vs` → 说「打开code」和「打开vs」打开同一个东西）。
+- **设置 UI（合并）**：自定义命令页统一管理「打开 X」与普通脚本命令——添加弹窗内单选：
+  - 「打开<触发词>」：路径为可执行文件（选择器过滤 `*.exe`），存入 `apps.json`
+  - 「触发词」：路径为脚本或程序（`.bat/.cmd/.ps1/.py/.exe`），存入 `commands.json`
+  - 附加参数不变。
 
 ---
 
@@ -283,8 +287,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 - 修改三组热键
 - **停止模式**（hotkey / vad）+ VAD 静音时长（默认 500ms，范围 200–5000ms）
 - **识别结果展示时长**（默认 1000ms，范围 0–10000ms；0 = 识别后立即执行）
-- 自定义命令 CRUD（`commands.json`）
-- 「打开」映射 CRUD（`apps.json`）
+- **自定义命令（合并）**：CRUD「打开 X」与普通脚本命令（§7.2 / §7.3，添加弹窗内单选类型）
 - 提示音开关
 - 开机自启动（debug 模式锁定）
 - _未来扩展项位置_：用户提到"还在想"，预留菜单项

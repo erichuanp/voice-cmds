@@ -52,9 +52,9 @@ Tray **帮助** lists every available command.
 
 ## Customizing
 
-- **打开 X**: tray → 设置 → "打开 (Apps)" → 添加新的打开
-- **Custom scripts**: tray → 设置 → 自定义命令 — bind a Chinese trigger word to any `.bat` / `.ps1` / `.exe`
-- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`. Tray → "重新加载配置" picks up changes (saving from the Settings dialog auto-restarts the app).
+- **打开 X**: tray → 设置 → 自定义命令 → 添加 → 选“打开<触发词>”。触发词支持 `;`/`；` 多别名（`code;vs` → 打开code 和 打开vs 是同一个）
+- **Custom scripts / programs**: tray → 设置 → 自定义命令 → 添加 → 选“触发词”，路径支持 `.bat` / `.ps1` / `.py` / `.exe`
+- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`, `config/tasks.json`. Tray → "重新加载配置" picks up changes (saving from the Settings dialog auto-restarts the app).
 
 ## Matching
 
