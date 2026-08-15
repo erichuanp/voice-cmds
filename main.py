@@ -21,13 +21,21 @@ import threading
 import traceback
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 import keyboard as kb
 
 from voice_cmds.config import Config
+from voice_cmds.errors import categorize_error
 from voice_cmds.logger import setup_logger
+from voice_cmds.ui.errorbox import ErrorDialog
 from voice_cmds.ui.splash import SplashWindow
+
+
+def _show_error_dialog(title: str, detail: str) -> None:
+    """Unified categorized error dialog (download / load / unknown)."""
+    category, guidance = categorize_error(detail)
+    ErrorDialog(title, category, guidance, detail).exec()
 
 
 class _Bootstrap(QObject):
@@ -96,9 +104,7 @@ class _Bootstrap(QObject):
             )
         except Exception:
             log.exception("VoiceCmdsApp construction failed")
-            QMessageBox.critical(
-                None, "voice-cmds 启动失败", traceback.format_exc()
-            )
+            _show_error_dialog("voice-cmds 启动失败", traceback.format_exc())
             QApplication.quit()
             os._exit(1)
         log.warning("_launch: ready")
@@ -117,11 +123,7 @@ class _Bootstrap(QObject):
     @Slot(str)
     def _on_failed(self, tb: str) -> None:
         self._destroy_splash()
-        QMessageBox.critical(
-            None,
-            "voice-cmds 启动失败",
-            f"无法初始化语音识别模型。\n\n{tb}",
-        )
+        _show_error_dialog("voice-cmds 启动失败", tb)
         try:
             kb.unhook_all()
         except Exception:

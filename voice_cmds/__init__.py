@@ -1,2 +1,2 @@
 """voice-cmds: Windows 11 voice command tool."""
-__version__ = "0.5.2"
+__version__ = "0.5.3"

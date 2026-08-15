@@ -1,13 +1,13 @@
 """Streaming STT using sherpa-onnx zipformer-bilingual-zh-en.
 
 Downloads individual ONNX files from HuggingFace (with hf-mirror.com
-fallback) on first run instead of the github tar.bz2 — github releases
-are unreliable in CN due to SSL interference, and HF mirrors give us a
-clean fallback path.
+fallback) on first run. When every mirror is unreachable, falls back to
+the whole-model tarball on GitHub Releases.
 """
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
@@ -16,7 +16,7 @@ import numpy as np
 
 from .audio import SAMPLE_RATE
 from .config import MODELS_DIR
-from .fetch import download_with_mirror_fallback
+from .fetch import download_one, download_with_mirror_fallback
 
 logger = logging.getLogger("voice_cmds.stt")
 
@@ -35,8 +35,58 @@ HF_FILES = (
     "tokens.txt",
 )
 
+# Last-resort whole-tarball source when every mirror is unreachable
+# (e.g. networks that reset HTTPS to both huggingface.co and hf-mirror.com).
+GITHUB_TARBALL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+    "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2"
+)
+
 StatusCB = Optional[Callable[[str], None]]
 ProgressCB = Optional[Callable[[int, int], None]]
+
+
+def _download_tarball(
+    model_dir: Path,
+    status_cb: StatusCB = None,
+    progress_cb: ProgressCB = None,
+) -> None:
+    """Download the GitHub tarball and extract the model files."""
+    import tarfile
+
+    tarball = MODELS_DIR / f"{MODEL_NAME}.tar.bz2"
+    if status_cb:
+        status_cb("镜像均不可用，正在从 GitHub 下载整包 (~500MB)…")
+    try:
+        download_one(
+            GITHUB_TARBALL,
+            tarball,
+            label="github tarball",
+            status_cb=status_cb,
+            progress_cb=progress_cb,
+        )
+        if status_cb:
+            status_cb("正在解压模型…")
+        prefix = MODEL_NAME + "/"
+        with tarfile.open(tarball, "r:bz2") as tf:
+            for member in tf.getmembers():
+                if not member.name.startswith(prefix):
+                    continue
+                rel = member.name[len(prefix):]
+                if not rel:
+                    continue
+                dest = model_dir / rel
+                if member.isdir():
+                    dest.mkdir(parents=True, exist_ok=True)
+                    continue
+                if dest.exists() and dest.stat().st_size > 0:
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                src = tf.extractfile(member)
+                with src, dest.open("wb") as out:
+                    shutil.copyfileobj(src, out, length=1 << 20)
+    finally:
+        tarball.unlink(missing_ok=True)
 
 
 def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> Path:
@@ -49,13 +99,23 @@ def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> 
     model_dir.mkdir(parents=True, exist_ok=True)
     if status_cb:
         status_cb("正在下载语音识别模型 (~280MB, 4 个文件)…")
-    for filename in HF_FILES:
-        dst = model_dir / filename
-        if dst.exists() and dst.stat().st_size > 0:
-            continue
-        download_with_mirror_fallback(
-            HF_REPO, filename, dst, HF_HOSTS, status_cb=status_cb, progress_cb=progress_cb
-        )
+    try:
+        for filename in HF_FILES:
+            dst = model_dir / filename
+            if dst.exists() and dst.stat().st_size > 0:
+                continue
+            download_with_mirror_fallback(
+                HF_REPO, filename, dst, HF_HOSTS,
+                status_cb=status_cb, progress_cb=progress_cb,
+            )
+    except Exception:
+        logger.warning("Per-file mirrors exhausted; falling back to github tarball")
+        _download_tarball(model_dir, status_cb=status_cb, progress_cb=progress_cb)
+
+    if not (model_dir / "encoder-epoch-99-avg-1.onnx").exists() or not (
+        model_dir / "tokens.txt"
+    ).exists():
+        raise RuntimeError("语音识别模型下载失败：所有来源均不可用")
     return model_dir
 
 

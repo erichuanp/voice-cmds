@@ -6,6 +6,8 @@ Chinese 保存/取消 buttons (no mixed-language QDialogButtonBox).
 """
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -268,16 +270,23 @@ class SettingsDialog(QDialog):
         add = QPushButton("添加")
         edit = QPushButton("编辑")
         rm = QPushButton("删除")
+        export = QPushButton("导出")
+        import_ = QPushButton("导入")
         add.clicked.connect(self._add_cmd)
         edit.clicked.connect(self._edit_cmd)
         rm.clicked.connect(self._remove_cmd)
+        export.clicked.connect(self._export_cmds)
+        import_.clicked.connect(self._import_cmds)
         btns.addWidget(add)
         btns.addWidget(edit)
         btns.addWidget(rm)
         btns.addStretch(1)
+        btns.addWidget(import_)
+        btns.addWidget(export)
         layout.addWidget(hint(
             "「打开<触发词>」用于启动程序（触发词可用 ; 或 ；分隔多个别名）；"
             "「触发词」用于脚本或程序（.bat/.cmd/.ps1/.py/.exe/.lnk）。"
+            "可用 导入/导出 通过 .jsonl 备份或迁移命令。"
         ))
         layout.addWidget(self.cmd_list, 1)
         layout.addLayout(btns)
@@ -318,6 +327,70 @@ class SettingsDialog(QDialog):
         row = self.cmd_list.currentRow()
         if row >= 0:
             self.cmd_list.takeItem(row)
+
+    def _export_cmds(self) -> None:
+        entries = [
+            self.cmd_list.item(i).data(0x100)
+            for i in range(self.cmd_list.count())
+        ]
+        if not entries:
+            QMessageBox.information(self, "导出", "当前没有可导出的命令。")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出命令", "voice-cmds-commands.jsonl",
+            "JSONL (*.jsonl);;All files (*.*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                for e in entries:
+                    f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", str(e))
+            return
+        QMessageBox.information(self, "导出", f"已导出 {len(entries)} 条命令：\n{path}")
+
+    def _import_cmds(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入命令", "", "JSONL (*.jsonl);;All files (*.*)"
+        )
+        if not path:
+            return
+        ok = skipped = 0
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        skipped += 1
+                        continue
+                    kind = obj.get("kind")
+                    trigger = (obj.get("trigger") or "").strip()
+                    args = obj.get("args", []) or []
+                    entry = None
+                    if kind == "app" and trigger and obj.get("path"):
+                        entry = {"kind": "app", "trigger": trigger,
+                                 "path": obj["path"], "args": args}
+                    elif kind == "custom" and trigger and obj.get("script"):
+                        entry = {"kind": "custom", "trigger": trigger,
+                                 "script": obj["script"], "args": args}
+                    if entry is None:
+                        skipped += 1
+                        continue
+                    self._add_cmd_item(entry)
+                    ok += 1
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", str(e))
+            return
+        QMessageBox.information(
+            self, "导入",
+            f"导入完成：新增 {ok} 条，跳过 {skipped} 条无效行。\n（点“保存”后生效）",
+        )
 
     # --- save -------------------------------------------------------------
     def _save(self) -> None:

@@ -73,11 +73,14 @@ class VoiceCmdsApp(QObject):
             self.hotkey.start()
         except Exception as e:
             self.logger.exception("Hotkey registration failed: %s", e)
-            QMessageBox.warning(
-                None,
-                "voice-cmds — 热键无效",
-                f"无法注册热键。请打开托盘 → 设置 → 通用 修正配置。\n\n{e}",
-            )
+            from .ui.errorbox import ErrorDialog
+
+            ErrorDialog(
+                "热键注册失败",
+                "热键注册失败",
+                "请打开 托盘 → 设置 → 通用 修正热键后保存（保存后程序会自动重启）。",
+                str(e),
+            ).exec()
 
     def _connect(self) -> None:
         self.hotkey.start_pressed.connect(self.on_start)

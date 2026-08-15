@@ -152,7 +152,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 |---|---|
 | 模型 | `sherpa-onnx-streaming-zipformer-bilingual-zh-en` |
 | 采样率 | 16 kHz mono |
-| 首次启动 | 自动下载到 `./models/`（带进度提示） |
+| 首次启动 | 自动下载到 `./models/`（带进度提示）。来源链：huggingface.co → hf-mirror.com，全部失败后回退 GitHub Releases 整包 tar.bz2 |
 | Provider | `cuda` 优先，失败回 `cpu` |
 | 流式回调 | partial 通过 Qt signal 发 UI |
 | 截断 | 识别到第 15 字符 → 立即停止 + 进入处理态 |
@@ -238,6 +238,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 - 路径选择器支持 `.bat / .cmd / .ps1 / .py / .exe / .lnk`（.lnk 经 cmd.exe 解析快捷方式）。
 - 「打开<触发词>」的触发词支持 `;` / `；` 多别名：`code;vs` → 说「打开code」和「打开vs」打开同一个东西。
 - 匹配器规则：app 条目**只**通过「打开 X」路径命中（不参与裸触发词字面/embedding 匹配）；custom 条目只在一般触发词集合中。
+- **导入 / 导出**：命令页支持 .jsonl 备份与迁移，每行一个条目：`{"kind":"app","trigger":…,"path":…,"args":[]}` 或 `{"kind":"custom","trigger":…,"script":…,"args":[]}`；导入跳过无效行并提示数量。
 
 ```json
 // config/apps.json
@@ -292,6 +293,14 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 - 开机自启动（debug 模式锁定）
 
 托盘菜单：**设置 / 帮助 / 定时任务 / 退出**。「帮助」为独立窗口，列出当前热键、结束方式、全部内置命令、定时任务语法、打开/自定义命令与匹配规则；「定时任务」打开任务列表（§7.3）。
+
+### 8.3 统一错误弹窗（`ui/errorbox.py` + `errors.py`）
+
+所有致命/重要错误（启动下载失败、模型加载失败、热键注册失败等）走同一个弹窗组件，与其余对话框共用样式：
+
+- **错误分类**（自动按 traceback 关键字归类）：网络 / 下载失败、模型 / 程序加载失败、未知错误；
+- **引导语**：每类配一句下一步建议（如“下载失败，请尝试改变网络环境后重试”）；
+- **详细信息**：默认折叠，可展开；文本框只读可选，另有「复制」按钮一键复制全文。
 
 ---
 
