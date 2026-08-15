@@ -343,6 +343,7 @@ class VoiceCmdsApp(QObject):
             # (hotkeys, new commands needing fresh embedding cache, autostart)
             # take effect cleanly.
             d.config_changed.connect(self._restart_after_save)
+            d.update_ready.connect(self._apply_update_and_restart)
             d.exec()
         finally:
             try:
@@ -375,6 +376,23 @@ class VoiceCmdsApp(QObject):
     def _restart_after_save(self) -> None:
         QMessageBox.information(None, "voice-cmds", "配置已保存，程序将自动重启以应用更改。")
         self.restart()
+
+    @Slot()
+    def _apply_update_and_restart(self) -> None:
+        """Spawn update.bat (applies staged files, relaunches) then exit."""
+        from .config import PROJECT_ROOT
+        from . import updater
+
+        try:
+            updater.launch_update_bat(PROJECT_ROOT)
+        except Exception as e:
+            self.logger.exception("Failed to launch update bat: %s", e)
+            QMessageBox.critical(
+                None, "voice-cmds",
+                f"更新应用失败：{e}\n请手动下载最新版本。",
+            )
+            return
+        self.shutdown()
 
     def restart(self) -> None:
         """Spawn a fresh instance with the same args, then exit."""

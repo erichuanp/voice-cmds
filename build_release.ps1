@@ -22,6 +22,23 @@ if (!(Test-Path $Sevenz)) { throw "7-Zip not found at $Sevenz" }
 if (!(Test-Path $Iscc))   { throw "Inno Setup not found at $Iscc" }
 if (!(Test-Path $Out))    { New-Item -ItemType Directory -Path $Out | Out-Null }
 
+# 0) manifest.json for differential updates: every shipped file's sha256.
+#    Written INTO the app dir (shipped with installer/zip so the updater can
+#    diff locally) and copied to release/ as the GitHub release asset.
+Write-Host "[0/3] Generating manifest.json..."
+$manifestFiles = Get-ChildItem $Dist -Recurse -File |
+    Where-Object { $_.FullName -notmatch "\\models\\|\\logs\\" }
+$list = @()
+foreach ($f in $manifestFiles) {
+    $rel = $f.FullName.Substring($Dist.Length + 1).Replace("\", "/")
+    $list += [ordered]@{ path = $rel; size = $f.Length; sha256 = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() }
+}
+$manifest = [ordered]@{ version = $Version; files = $list }
+$manifestJson = ($manifest | ConvertTo-Json -Depth 4)
+$manifestJson | Set-Content (Join-Path $Dist "manifest.json") -Encoding UTF8
+$manifestJson | Set-Content (Join-Path $Out "manifest.json") -Encoding UTF8
+Write-Host ("    -> {0}\manifest.json ({1} files)" -f $Dist, $list.Count)
+
 # 1) Portable zip
 Write-Host "[1/3] Building portable zip..."
 if (Test-Path $Zip) { Remove-Item $Zip -Force }

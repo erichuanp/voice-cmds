@@ -88,6 +88,9 @@ Type: filesandordirs; Name: "{app}\models"
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\config"
 Type: filesandordirs; Name: "{app}\scripts"
+Type: filesandordirs; Name: "{app}\_update"
+Type: files; Name: "{app}\_update.json"
+Type: files; Name: "{app}\update.bat"
 
 [Code]
 function AutostartLabel(Param: string): string;

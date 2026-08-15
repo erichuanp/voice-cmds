@@ -150,7 +150,10 @@ def fetch_latest_version() -> str:
 
 class SettingsDialog(QDialog):
     config_changed = Signal()
-    update_checked = Signal(str, str)  # (latest_tag, error)
+    update_checked = Signal(str, str)      # (latest_tag, error)
+    update_progress = Signal(str, int)     # (status_text, percent or -1)
+    update_prepared = Signal(int, int, str)  # (changed, deleted, error)
+    update_ready = Signal()
 
     def __init__(self, config, debug: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -166,6 +169,8 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_about_tab(), "关于")
 
         self.update_checked.connect(self._on_update_checked)
+        self.update_progress.connect(self._on_update_progress)
+        self.update_prepared.connect(self._on_update_prepared)
 
         save_btn = QPushButton("保存")
         cancel_btn = QPushButton("取消")
@@ -466,8 +471,7 @@ class SettingsDialog(QDialog):
         self.check_btn.clicked.connect(self._check_update)
         self.update_status = QLabel("")
         self.update_btn = QPushButton("更新到最新版本")
-        self.update_btn.setEnabled(False)  # auto-update not implemented yet
-        self.update_btn.setToolTip("自动更新功能开发中")
+        self.update_btn.setEnabled(False)  # enabled when a hot update is available
         self.update_btn.hide()
         row.addWidget(self.check_btn)
         row.addWidget(self.update_status)
@@ -496,17 +500,74 @@ class SettingsDialog(QDialog):
 
         self.check_btn.setEnabled(True)
         if error:
-            self.update_status.setText("检查失败：网络不可用")
+            self.update_status.setText("网络出错检查失败")
             self.update_status.setStyleSheet("color:#c62828;")
+            self.update_btn.hide()
             return
-        if compare_versions(cur, latest) >= 0:
+        cmp = compare_versions(cur, latest)
+        if cmp >= 0:
             self.update_status.setText("已经是最新版本")
             self.update_status.setStyleSheet("color:#00C853;")
             self.update_btn.hide()
+            return
+        if _parse_version(cur)[:1] < _parse_version(latest)[:1]:
+            # Major version mismatch — too outdated for a hot update.
+            self.update_status.setText("版本过时，请于GitHub Release下载最新版本")
+            self.update_status.setStyleSheet("color:#c62828;")
+            self.update_btn.hide()
+            return
+        self.update_status.setText(f"发现新版本 {latest}")
+        self.update_status.setStyleSheet("color:#808080;")
+        self.update_btn.setEnabled(True)
+        self.update_btn.setToolTip("")
+        self.update_btn.clicked.connect(self._start_update)
+        self.update_btn.show()
+
+    def _start_update(self) -> None:
+        from ..config import PROJECT_ROOT
+        from .. import updater
+
+        self.update_btn.setEnabled(False)
+        self.update_status.setText("正在比对差异文件…")
+        self.update_status.setStyleSheet("color:#808080;")
+
+        def worker():
+            try:
+                changed, deleted = updater.prepare_update(
+                    PROJECT_ROOT,
+                    status_cb=lambda s: self.update_progress.emit(s, -1),
+                    progress_cb=lambda d, t: self.update_progress.emit(
+                        "", max(0, min(99, round(d * 100 / max(t, 1))))
+                    ),
+                )
+                self.update_prepared.emit(changed, deleted, "")
+            except Exception as e:
+                self.update_prepared.emit(0, 0, str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(str, int)
+    def _on_update_progress(self, text: str, percent: int) -> None:
+        if percent >= 0:
+            self.update_status.setText(f"正在下载: {percent}%")
         else:
-            self.update_status.setText(f"发现新版本 {latest}")
-            self.update_status.setStyleSheet("color:#808080;")
-            self.update_btn.show()
+            self.update_status.setText(text)
+        self.update_status.setStyleSheet("color:#808080;")
+
+    @Slot(int, int, str)
+    def _on_update_prepared(self, changed: int, deleted: int, error: str) -> None:
+        if error:
+            self.update_status.setText(f"更新失败：{error}（请手动下载）")
+            self.update_status.setStyleSheet("color:#c62828;")
+            self.update_btn.setEnabled(True)
+            return
+        self.update_status.setText("更新完成")
+        self.update_status.setStyleSheet("color:#00C853;")
+        QMessageBox.information(
+            self, "voice-cmds", "更新已完成，程序将自动重启以应用更新。"
+        )
+        self.update_ready.emit()
+        self.accept()
 
     # --- save -------------------------------------------------------------
     def _save(self) -> None:
