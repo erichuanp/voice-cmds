@@ -40,16 +40,20 @@ def _send_vk(vk: int) -> None:
     user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
 
+# Fixed grace period before shutdown/restart/logoff — a small safety window
+# against accidental voice triggers (scheduled shutdowns go through the
+# timed-task system instead).
+_SHUTDOWN_GRACE_SECONDS = 15
+
+
 # --- implementations ---
 
 def shutdown(config, logger):
-    delay = config.settings["shutdown_delay_seconds"]
-    _run(["shutdown", "/s", "/t", str(delay)], logger)
+    _run(["shutdown", "/s", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
 
 
 def restart(config, logger):
-    delay = config.settings["shutdown_delay_seconds"]
-    _run(["shutdown", "/r", "/t", str(delay)], logger)
+    _run(["shutdown", "/r", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
 
 
 def sleep(config, logger):
@@ -58,8 +62,7 @@ def sleep(config, logger):
 
 
 def logoff(config, logger):
-    delay = config.settings["shutdown_delay_seconds"]
-    _run(["shutdown", "/l", "/t", str(delay)], logger)
+    _run(["shutdown", "/l", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
 
 
 def abort_shutdown(config, logger, scheduler=None):

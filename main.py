@@ -66,7 +66,6 @@ class _Bootstrap(QObject):
             self.splash.set_status("正在准备语音识别模型…")
             from voice_cmds.stt import StreamingSTT
             stt = StreamingSTT.prepare(
-                max_chars=self.config.settings["max_chars"],
                 status_cb=self.splash.set_status,
                 progress_cb=self.splash.set_progress,
             )

@@ -89,10 +89,9 @@ voice-cmds/
 | 取消（不识别不执行） | **Esc** | 仅在录音中 |
 
 > 单按 RAlt 仅在录音中拦截；非录音状态完全透传，不影响正常输入。
-> **停止模式**（设置 → 通用）：`vad`（默认）/ `hotkey`。
-> - `vad`：识别到文字后静音 ≥ `vad_silence_ms`（默认 500ms，≥200ms）自动结束识别；
-> - `hotkey`：仅按停止键结束识别；
-> - 结束识别后先展示识别结果 `result_text_ms`（默认 1000ms，≥0），**展示结束才执行命令**；
+> **停止模式**（设置 → 通用）：`hotkey`（默认）/ `vad`。
+> - `hotkey`：仅按停止键结束识别，识别后**立即执行**（结果展示时长恒为 0）；
+> - `vad`：识别到文字后静音 ≥ `vad_silence_ms`（默认 500ms，≥200ms）自动结束识别；识别后先展示结果 `result_text_ms`（默认 1000ms，≥0）再执行；
 > - **两种模式下右 Alt / Esc 始终有效**。
 > VAD 为自适应能量检测：静音判定阈值 = max(0.012, 3 × 环境底噪)，底噪按 EMA 缓慢跟踪；未识别到任何文字前不会自动停止。
 
@@ -106,12 +105,12 @@ voice-cmds/
    │ 收到 partial（>0 字）
    ▼
 [Recording-Capsule 高80 宽自适应 绿]  ←── 文字流式追加
-   │ 停止键 / VAD 静音 0.5s / 达到 15 字
+   │ 停止键 / VAD 静音 0.5s
    ▼
 [Processing 胶囊 + Loading 蒙层]
    │ 处理完成
    ▼
-[Result 胶囊 + 识别文本]  ←── 绿=匹配成功 / 红=未匹配或失败，停留 result_text_ms（默认 1000ms）
+[Result 胶囊 + 识别文本]  ←── 绿=匹配成功 / 红=未匹配或失败；仅 VAD 模式停留 result_text_ms（默认 1000ms），热键模式恒 0（立即执行）
    │ 展示结束后（此时才执行命令）
    ├──── 成功 ───▶ [Done-Success 圆形 + ✔ 绿] ─ 2s ─▶ [Hidden]
    ├──── 失败 ───▶ [Done-Error   圆形 + ✗ 红] ─ 2s ─▶ [Hidden]
@@ -127,7 +126,6 @@ voice-cmds/
 | 圆形直径 | 80 px |
 | 胶囊高度 | 80 px |
 | 胶囊最大宽度 | 600 px |
-| 文字字数上限 | **15 字符** — 达到立即触发停止 |
 | 文字 | 多行允许（达到 max width 后换行） |
 | 阴影 | DropShadow，blur 12，offset (0,4)，alpha 160（仿 Win11 elevation） |
 | 窗口 | Frameless + Translucent + Tool（不抢焦点，不进任务栏） |
@@ -155,7 +153,6 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 | 首次启动 | 自动下载到 `./models/`（带进度提示）。来源链：huggingface.co → hf-mirror.com，全部失败后回退 GitHub Releases 整包 tar.bz2 |
 | Provider | `cuda` 优先，失败回 `cpu` |
 | 流式回调 | partial 通过 Qt signal 发 UI |
-| 截断 | 识别到第 15 字符 → 立即停止 + 进入处理态 |
 
 ---
 
@@ -197,7 +194,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 > 「打开资源管理器」不再是内置命令——它作为**默认自带的「打开<触发词>」条目**存在于 `config/apps.json`（触发词 `资源管理器`，路径 `C:\Windows\explorer.exe`，无附加参数）。默认配置不含其它条目。
 
-> **如果某条实现遇阻**：先注册触发词入口，但执行体替换为「占位提示音」（播 `assets/success.wav`）+ 日志记录 "TODO"，不阻塞整体上线。
+> **如果某条实现遇阻**：先注册触发词入口，执行体替换为占位实现 + 日志记录 "TODO"，不阻塞整体上线。
 
 ### 7.3 定时任务（`scheduler.py` + `ui/tasks.py`）
 
@@ -260,10 +257,8 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
     "stop": "right alt",
     "cancel": "esc"
   },
-  "stop_mode": "vad",
+  "stop_mode": "hotkey",
   "vad_silence_ms": 500,
-  "max_chars": 15,
-  "shutdown_delay_seconds": 15,
   "ui": {
     "color_idle": "#00C853",
     "color_error": "#E53935",
@@ -275,21 +270,16 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
   "match": {
     "embedding_similarity_threshold": 0.85,
     "pinyin_similarity_threshold": 0.88
-  },
-  "sound": {
-    "success_enabled": true,
-    "error_enabled": true
   }
 }
 ```
 
 ### 8.2 设置窗口（暴露的项）
 
-- 修改三组热键
-- **停止模式**（hotkey / vad）+ 静音时长（默认 500ms，范围 200–5000ms）
-- **结果展示时长**（默认 1000ms，范围 0–10000ms；0 = 识别后立即执行）
-- **命令页（合并）**：统一管理「打开 X」与自定义命令（§7.2，添加弹窗内单选决定触发词规则）
-- 提示音开关
+- **热键录制**（§4.1）：点击输入框后按键盘/鼠标键直接录制（开始录音两个键，结束/取消一个键；支持右键，不支持左键；Esc 取消录制）；每行带「重置」按钮恢复默认。保存前用 keyboard 库校验格式
+- **结束方式**（默认 hotkey）+ 静音时长（默认 500ms，范围 200–5000ms）
+- **结果展示时长**（仅 VAD 模式生效，默认 1000ms，范围 0–10000ms；**热键模式恒 0 = 识别后立即执行**，该输入框在热键模式下禁用）
+- **命令页（合并）**：统一管理「打开 X」与自定义命令（§7.2，添加弹窗内单选决定触发词规则），支持 jsonl 导入/导出
 - 开机自启动（debug 模式锁定）
 
 托盘菜单：**设置 / 帮助 / 定时任务 / 退出**。「帮助」为独立窗口，列出当前热键、结束方式、全部内置命令、定时任务语法、打开/自定义命令与匹配规则；「定时任务」打开任务列表（§7.3）。
@@ -350,9 +340,7 @@ dependencies:
 - [x] ~~开机自启注册~~（设置 → 通用）
 - [x] ~~embedder 换直接 ONNX~~（0.1.0：onnxruntime + tokenizers，CLS 池化与 torch 逐条一致）
 - [x] ~~托盘「帮助」菜单~~（0.1.0）
-- [ ] 自定义提示音文件路径（替换默认 wav）
 - [ ] 识别历史窗口（最近 50 条）
 - [ ] 设置窗口"其他设置项"区域（占位）
 - [ ] 多语言 UI（目前中文）
 - [x] ~~卸载脚本~~（0.5.2：Inno Setup 卸载器，清理自启动与运行数据）
-- [ ] 提示音 wav 尚未打包进发布产物

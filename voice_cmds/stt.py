@@ -122,8 +122,7 @@ def ensure_model(status_cb: StatusCB = None, progress_cb: ProgressCB = None) -> 
 class StreamingSTT:
     """Wraps sherpa-onnx OnlineRecognizer for incremental decoding."""
 
-    def __init__(self, recognizer, max_chars: int = 15) -> None:
-        self.max_chars = max_chars
+    def __init__(self, recognizer) -> None:
         self._lock = Lock()
         self.recognizer = recognizer
         self.stream = self.recognizer.create_stream()
@@ -131,7 +130,6 @@ class StreamingSTT:
     @classmethod
     def prepare(
         cls,
-        max_chars: int = 15,
         status_cb: StatusCB = None,
         progress_cb: ProgressCB = None,
     ) -> "StreamingSTT":
@@ -154,7 +152,7 @@ class StreamingSTT:
             decoding_method="greedy_search",
             provider="cpu",
         )
-        return cls(recognizer, max_chars=max_chars)
+        return cls(recognizer)
 
     def reset(self) -> None:
         with self._lock:
@@ -176,6 +174,3 @@ class StreamingSTT:
             while self.recognizer.is_ready(self.stream):
                 self.recognizer.decode_stream(self.stream)
             return self.recognizer.get_result(self.stream).strip()
-
-    def at_limit(self, text: str) -> bool:
-        return len(text) >= self.max_chars

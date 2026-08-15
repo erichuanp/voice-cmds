@@ -34,10 +34,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "stop": "right alt",
         "cancel": "esc",
     },
-    "stop_mode": "vad",
+    "stop_mode": "hotkey",
     "vad_silence_ms": 500,
-    "max_chars": 15,
-    "shutdown_delay_seconds": 15,
     "ui": {
         "color_idle": "#00C853",
         "color_error": "#E53935",
@@ -51,10 +49,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "match": {
         "embedding_similarity_threshold": 0.85,
         "pinyin_similarity_threshold": 0.88,
-    },
-    "sound": {
-        "success_enabled": True,
-        "error_enabled": True,
     },
 }
 

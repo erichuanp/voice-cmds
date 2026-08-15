@@ -35,10 +35,14 @@ Edit `config/settings.json` or use **Tray → 设置 → 通用**.
 
 ## Stop modes
 
-**Tray → 设置 → 通用 → 停止模式**:
+**Tray → 设置 → 通用 → 结束方式**:
 
-- **`vad` (default)** — execute automatically after 0.5 s of silence (configurable `vad_silence_ms`); `Right Alt` / `Esc` still work.
-- **`hotkey`** — execute only when you press the stop key.
+- **`hotkey` (default)** — press the stop key to end; the command executes immediately.
+- **`vad`** — 0.5 s of silence (configurable) ends recording; the recognized text is then shown for `result_text_ms` (default 1000 ms) before executing. `Right Alt` / `Esc` still work in both modes.
+
+## Hotkey capture
+
+In 设置 → 通用 → 热键, click a field and press the key(s) to record (start needs two keys, stop/cancel one; mouse right button supported, left excluded; Esc cancels). Each row has a 重置 button restoring the default.
 
 ## Built-in commands
 

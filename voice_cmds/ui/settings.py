@@ -1,4 +1,4 @@
-"""Settings dialog: hotkeys, recognition, sounds, autostart and commands.
+"""Settings dialog: hotkey capture, recognition and commands.
 
 Layout follows one convention everywhere: QFormLayout rows inside named
 QGroupBox sections, gray hint() labels for secondary info, and plain
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from .common import DIALOG_STYLE, hint
+from .hotkeyedit import HotkeyLineEdit
 
 
 class _CommandDialog(QDialog):
@@ -161,12 +162,32 @@ class SettingsDialog(QDialog):
         f = QFormLayout(hotkey_box)
         f.setHorizontalSpacing(16)
         f.setVerticalSpacing(8)
-        self.start_key = QLineEdit(s["hotkey"]["start"])
-        self.stop_key = QLineEdit(s["hotkey"]["stop"])
-        self.cancel_key = QLineEdit(s["hotkey"]["cancel"])
-        f.addRow("开始录音", self.start_key)
-        f.addRow("结束识别", self.stop_key)
-        f.addRow("取消", self.cancel_key)
+        self.start_key = HotkeyLineEdit(
+            s["hotkey"]["start"], two_keys=True, hint="请设置两个键的快捷键..."
+        )
+        self.stop_key = HotkeyLineEdit(
+            s["hotkey"]["stop"], two_keys=False, hint="请设置快捷键..."
+        )
+        self.cancel_key = HotkeyLineEdit(
+            s["hotkey"]["cancel"], two_keys=False, hint="请设置快捷键..."
+        )
+        self._hotkey_fields = (
+            (self.start_key, s["hotkey"]["start"], "开始录音"),
+            (self.stop_key, s["hotkey"]["stop"], "结束识别"),
+            (self.cancel_key, s["hotkey"]["cancel"], "取消"),
+        )
+        for field, default, label in self._hotkey_fields:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(field, 1)
+            reset = QPushButton("重置")
+            reset.setMinimumWidth(56)
+            reset.clicked.connect(lambda _=False, fl=field, d=default: fl.reset_to_default(d))
+            row.addWidget(reset)
+            row_widget = QWidget()
+            row_widget.setLayout(row)
+            f.addRow(label, row_widget)
+        f.addRow("", hint("点击输入框后按下按键即可录制；开始录音需要两个键，结束/取消一个键。鼠标支持右键，不支持左键。Esc 取消录制。"))
         v.addWidget(hotkey_box)
 
         # 识别
@@ -175,9 +196,9 @@ class SettingsDialog(QDialog):
         f.setHorizontalSpacing(16)
         f.setVerticalSpacing(8)
         self.stop_mode = QComboBox()
-        self.stop_mode.addItem("静音自动停止", "vad")
         self.stop_mode.addItem("热键停止", "hotkey")
-        idx = self.stop_mode.findData(s.get("stop_mode", "vad"))
+        self.stop_mode.addItem("静音自动停止", "vad")
+        idx = self.stop_mode.findData(s.get("stop_mode", "hotkey"))
         self.stop_mode.setCurrentIndex(max(0, idx))
         f.addRow("结束方式", self.stop_mode)
 
@@ -199,39 +220,13 @@ class SettingsDialog(QDialog):
         self.result_ms.setValue(int(s.get("ui", {}).get("result_text_ms", 1000)))
         self.result_ms.setSuffix(" ms")
         f.addRow("结果展示时长", self.result_ms)
-        f.addRow("", hint("识别结果停留多久后再执行命令（0 = 立即执行）"))
-
-        self.max_chars = QSpinBox()
-        self.max_chars.setRange(3, 50)
-        self.max_chars.setValue(s["max_chars"])
-        f.addRow("最长识别字符数", self.max_chars)
-        f.addRow("", hint("识别达到该字数立即结束"))
+        self._result_hint = hint(self._result_hint_text(self.stop_mode.currentData()))
+        f.addRow("", self._result_hint)
+        self.stop_mode.currentIndexChanged.connect(
+            lambda _i: self._sync_result_ms()
+        )
+        self._sync_result_ms()
         v.addWidget(rec_box)
-
-        # 系统
-        sys_box = QGroupBox("系统")
-        f = QFormLayout(sys_box)
-        f.setHorizontalSpacing(16)
-        f.setVerticalSpacing(8)
-        self.shutdown_delay = QSpinBox()
-        self.shutdown_delay.setRange(0, 300)
-        self.shutdown_delay.setValue(s["shutdown_delay_seconds"])
-        self.shutdown_delay.setSuffix(" s")
-        f.addRow("关机/重启倒计时", self.shutdown_delay)
-        v.addWidget(sys_box)
-
-        # 提示音
-        sound_box = QGroupBox("提示音")
-        f = QFormLayout(sound_box)
-        f.setHorizontalSpacing(16)
-        f.setVerticalSpacing(8)
-        self.sound_success = QCheckBox("成功提示音")
-        self.sound_success.setChecked(s["sound"]["success_enabled"])
-        self.sound_error = QCheckBox("失败提示音")
-        self.sound_error.setChecked(s["sound"]["error_enabled"])
-        f.addRow("", self.sound_success)
-        f.addRow("", self.sound_error)
-        v.addWidget(sound_box)
 
         # 启动
         boot_box = QGroupBox("启动")
@@ -254,6 +249,17 @@ class SettingsDialog(QDialog):
     @staticmethod
     def _vad_hint_text(ms: int) -> str:
         return f"识别到内容后静音达到 {ms} ms 自动结束；停止/取消热键始终可用。"
+
+    @staticmethod
+    def _result_hint_text(mode: str) -> str:
+        if mode == "hotkey":
+            return "热键停止模式下识别结束后立即执行（结果展示时长恒为 0）。"
+        return "静音自动停止模式下，识别结果停留多久后再执行命令（0 = 立即执行）。"
+
+    def _sync_result_ms(self) -> None:
+        hotkey_mode = self.stop_mode.currentData() == "hotkey"
+        self.result_ms.setEnabled(not hotkey_mode)
+        self._result_hint.setText(self._result_hint_text(self.stop_mode.currentData()))
 
     # --- Commands tab (merged: 打开 X + 脚本/程序) ------------------------
     def _build_commands_tab(self) -> QWidget:
@@ -395,16 +401,26 @@ class SettingsDialog(QDialog):
     # --- save -------------------------------------------------------------
     def _save(self) -> None:
         s = self.config.settings
-        s["hotkey"]["start"] = self.start_key.text().strip()
-        s["hotkey"]["stop"] = self.stop_key.text().strip()
-        s["hotkey"]["cancel"] = self.cancel_key.text().strip()
+        hotkeys = {
+            "start": self.start_key.text().strip(),
+            "stop": self.stop_key.text().strip(),
+            "cancel": self.cancel_key.text().strip(),
+        }
+        # Validate the captured combos against the keyboard library.
+        try:
+            import keyboard as kb_mod
+            for label, combo in hotkeys.items():
+                if not combo:
+                    QMessageBox.warning(self, "热键无效", f"{label} 热键为空。")
+                    return
+                kb_mod.parse_hotkey(combo)
+        except Exception as e:
+            QMessageBox.warning(self, "热键无效", f"热键格式无效：{e}")
+            return
+        s["hotkey"] = hotkeys
         s["stop_mode"] = self.stop_mode.currentData()
         s["vad_silence_ms"] = self.vad_ms.value()
         s.setdefault("ui", {})["result_text_ms"] = self.result_ms.value()
-        s["max_chars"] = self.max_chars.value()
-        s["shutdown_delay_seconds"] = self.shutdown_delay.value()
-        s["sound"]["success_enabled"] = self.sound_success.isChecked()
-        s["sound"]["error_enabled"] = self.sound_error.isChecked()
 
         apps, commands = [], []
         for i in range(self.cmd_list.count()):

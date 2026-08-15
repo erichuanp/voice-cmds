@@ -175,9 +175,6 @@ class VoiceCmdsApp(QObject):
     @Slot(str)
     def _on_partial(self, text: str) -> None:
         self.overlay.update_text(text)
-        if self.stt and self.stt.at_limit(text):
-            self.logger.info("Char limit reached, auto-stopping")
-            self._finalize_and_process()
 
     # --- finalize + dispatch ---
     def _finalize_and_process(self) -> None:
@@ -234,7 +231,12 @@ class VoiceCmdsApp(QObject):
             self._reset_after_done()
             return
         self.overlay.show_result_text(text, ok=ok)
-        ms = int(self.config.settings.get("ui", {}).get("result_text_ms", 1000))
+        # Hotkey-stop mode executes immediately; the result-text pause only
+        # applies to VAD auto-stop.
+        if self.config.settings.get("stop_mode") == "hotkey":
+            ms = 0
+        else:
+            ms = int(self.config.settings.get("ui", {}).get("result_text_ms", 1000))
         if ms <= 0:
             self._execute_then_done(text, result)
             return
