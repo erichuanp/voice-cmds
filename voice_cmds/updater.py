@@ -72,9 +72,22 @@ def load_local_manifest(root: Path) -> dict:
 
 
 def compute_diff(root: Path, remote: dict) -> tuple[list[str], list[str]]:
-    """Return (changed paths, deleted paths) vs the shipped local manifest."""
-    local_files = {f["path"]: f for f in load_local_manifest(root).get("files", [])}
-    remote_files = {f["path"]: f for f in remote.get("files", [])}
+    """Return (changed paths, deleted paths) vs the shipped local manifest.
+
+    manifest.json is special: it never participates in the diff — the
+    updater always stages the freshly downloaded remote manifest instead,
+    so the local copy tracks the installed version.
+    """
+    local_files = {
+        f["path"]: f
+        for f in load_local_manifest(root).get("files", [])
+        if f["path"] != "manifest.json"
+    }
+    remote_files = {
+        f["path"]: f
+        for f in remote.get("files", [])
+        if f["path"] != "manifest.json"
+    }
     changed = []
     for path, meta in remote_files.items():
         p = root / path
@@ -92,7 +105,13 @@ def _zip_index(url: str) -> dict:
     head.close()
     if total <= 0:
         raise RuntimeError("无法获取更新包大小")
-    tail = requests.get(url, headers={"Range": f"bytes=-66000"}, timeout=(15, 60)).content
+    # NOTE: release-assets.githubusercontent.com does NOT support suffix byte
+    # ranges ("bytes=-66000" → 501); an explicit start-end range works.
+    tail_start = max(0, total - 66000)
+    tail = requests.get(
+        url, headers={"Range": f"bytes={tail_start}-{total - 1}"},
+        timeout=(15, 60),
+    ).content
     eocd = tail.rfind(b"PK\x05\x06")
     if eocd < 0:
         raise RuntimeError("更新包格式异常（找不到 EOCD）")
@@ -150,7 +169,7 @@ def _stage(root: Path, remote: dict, changed: list[str], deleted: list[str]) -> 
 
 def _full_download(
     root: Path, zip_url: str, files_map: dict, changed: list[str], deleted: list[str],
-    status_cb: StatusCB, progress_cb: ProgressCB,
+    status_cb: StatusCB, progress_cb: ProgressCB, manifest_text: str = "",
 ) -> None:
     """Fallback: download the whole zip and extract the changed entries."""
     if status_cb:
@@ -182,8 +201,11 @@ def _full_download(
             dest = stage / p
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
+    if manifest_text:
+        (stage / "manifest.json").write_text(manifest_text, encoding="utf-8")
     (root / "_update.json").write_text(
-        json.dumps({"files": changed, "deleted": deleted}, ensure_ascii=False),
+        json.dumps({"files": changed + (["manifest.json"] if manifest_text else []),
+                    "deleted": deleted}, ensure_ascii=False),
         encoding="utf-8",
     )
 
@@ -197,7 +219,10 @@ def prepare_update(
     info = fetch_latest_release()
     if not info["manifest_url"] or not info["zip_url"]:
         raise RuntimeError("发布页缺少 manifest 或便携包资产，请手动下载")
-    remote = requests.get(info["manifest_url"], timeout=(15, 60)).json()
+    r = requests.get(info["manifest_url"], timeout=(15, 60))
+    r.raise_for_status()
+    manifest_text = r.text
+    remote = json.loads(manifest_text)
     files_map = {f["path"]: f for f in remote.get("files", [])}
     changed, deleted = compute_diff(root, remote)
     if status_cb:
@@ -225,34 +250,46 @@ def prepare_update(
             done += comp
             if progress_cb:
                 progress_cb(done, total)
+        # Always ship the freshly downloaded manifest with the update.
+        (stage / "manifest.json").write_text(manifest_text, encoding="utf-8")
         (root / "_update.json").write_text(
-            json.dumps({"files": changed, "deleted": deleted}, ensure_ascii=False),
+            json.dumps({"files": changed + ["manifest.json"], "deleted": deleted},
+                       ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception:
         logger.exception("Differential update failed; falling back to full download")
-        _full_download(root, info["zip_url"], files_map, changed, deleted, status_cb, progress_cb)
+        _full_download(root, info["zip_url"], files_map, changed, deleted,
+                       status_cb, progress_cb, manifest_text)
     return len(changed), len(deleted)
 
 
 def launch_update_bat(root: Path) -> Path:
     """Write and spawn update.bat (apply staged files, restart the app).
 
-    The app must exit right after calling this — the bat waits ~2s for the
-    old process to release file locks, copies _update over the app, removes
-    deleted files, then starts the new exe.
+    The app must exit right after calling this. The bat waits for the old
+    process to release file locks and RETRIES copying the exe until it
+    succeeds (restarting too early left the old exe in place in 0.8.0/0.8.1),
+    then copies everything else, removes deleted files and starts the new exe.
     """
     plan = json.loads((root / "_update.json").read_text(encoding="utf-8"))
     lines = [
         "@echo off",
-        "timeout /t 2 /nobreak >nul",
-        f'xcopy /e /y /q "{root}\\_update\\*" "{root}\\" >nul',
-        f'rmdir /s /q "{root}\\_update"',
+        "timeout /t 3 /nobreak >nul",
+        ":retry_exe",
+        'copy /y "%~dp0_update\\voice-cmds.exe" "%~dp0voice-cmds.exe" >nul 2>&1',
+        "if errorlevel 1 (",
+        "  timeout /t 1 /nobreak >nul",
+        "  goto retry_exe",
+        ")",
+        'xcopy /e /y /q "%~dp0_update\\*" "%~dp0" >nul 2>&1',
+        'rmdir /s /q "%~dp0_update"',
     ]
     for p in plan.get("deleted", []):
-        lines.append(f'del /f /q "{root}\\{p}"')
-    lines.append(f'del /f /q "{root}\\_update.json"')
-    lines.append(f'start "" "{root}\\voice-cmds.exe"')
+        rel = p.replace("/", "\\")
+        lines.append(f'del /f /q "%~dp0{rel}"')
+    lines.append('del /f /q "%~dp0_update.json"')
+    lines.append('start "" "%~dp0voice-cmds.exe"')
     bat = root / "update.bat"
     bat.write_text("\r\n".join(lines) + "\r\n", encoding="ascii")
     subprocess.Popen(
