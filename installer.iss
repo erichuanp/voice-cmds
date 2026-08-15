@@ -13,6 +13,7 @@
 #endif
 
 #define AppName        "voice-cmds"
+#define ShortcutName   "Voice Commands"
 #define AppPublisher   "erichuanp"
 #define AppURL         "https://github.com/erichuanp/voice-cmds"
 #define AppExeName     "voice-cmds.exe"
@@ -66,9 +67,9 @@ Name: "{app}\logs";     Permissions: users-modify
 Name: "{app}\scripts";  Permissions: users-modify
 
 [Icons]
-Name: "{group}\{#AppName}";            Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{group}\{#ShortcutName}";        Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#AppName}";      Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#ShortcutName}";  Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Registry]
 ; Optional per-user autostart, created on install only when the task is on.

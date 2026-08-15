@@ -163,6 +163,10 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    # Use our logo for every window's title bar (dialogs inherit it).
+    from voice_cmds.ui.icons import build_app_icon
+
+    app.setWindowIcon(build_app_icon())
     _install_sigint(app)
 
     config = Config()
