@@ -109,11 +109,14 @@ class VoiceCmdsApp(QObject):
         self._partial_text = ""
         self._vad_silence_ms = 0.0
         self._vad_floor = 0.004
+        # Voice+typing editing is only available with hotkey stop; in VAD
+        # mode the capsule stays a plain display.
+        self._editable = self.config.settings.get("stop_mode") == "hotkey"
         try:
             self.stt.reset()
         except Exception:
             self.logger.exception("STT reset failed")
-        self.overlay.show_recording()
+        self.overlay.show_recording(editable=self._editable)
         self.audio.start(self._on_audio_chunk)
 
     @Slot()
@@ -174,7 +177,20 @@ class VoiceCmdsApp(QObject):
 
     @Slot(str)
     def _on_partial(self, text: str) -> None:
-        self.overlay.update_text(text)
+        if self._editable:
+            delta = self._partial_delta(self._partial_text, text)
+            self.overlay.append_partial(delta)
+        else:
+            self.overlay.update_text(text)
+
+    @staticmethod
+    def _partial_delta(old: str, new: str) -> str:
+        """Voice partials are cumulative — return the newly added tail."""
+        if not old:
+            return new
+        if new.startswith(old):
+            return new[len(old):]
+        return new
 
     # --- finalize + dispatch ---
     def _finalize_and_process(self) -> None:
@@ -203,6 +219,14 @@ class VoiceCmdsApp(QObject):
         execute after ui.result_text_ms (so the user can confirm what was
         recognized before the command actually fires)."""
         self.logger.warning("App: _dispatch called with %r", text)
+        if self._editable:
+            # Append the recognizer's trailing tail (if any) to the edited
+            # text at the cursor position, then use the full edited text.
+            delta = self._partial_delta(self._partial_text, text)
+            if delta:
+                self.overlay.append_partial(delta)
+            text = self.overlay.current_text()
+            self.logger.warning("App: final editable text %r", text)
         try:
             result = self.matcher.match(text)
         except Exception as e:

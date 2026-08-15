@@ -7,8 +7,9 @@ Chinese 保存/取消 buttons (no mixed-language QDialogButtonBox).
 from __future__ import annotations
 
 import json
+import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -118,8 +119,38 @@ class _CommandDialog(QDialog):
         return v
 
 
+def _parse_version(v: str) -> tuple:
+    v = (v or "").strip().lstrip("vV")
+    parts = []
+    for p in v.split("."):
+        try:
+            parts.append(int(p.split("-")[0]))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) or (0,)
+
+
+def compare_versions(current: str, latest: str) -> int:
+    """-1 if current < latest, 0 if equal, 1 if current > latest."""
+    a, b = _parse_version(current), _parse_version(latest)
+    return (a > b) - (a < b)
+
+
+def fetch_latest_version() -> str:
+    """Query the latest release tag from GitHub (raises on any failure)."""
+    import requests
+
+    r = requests.get(
+        "https://api.github.com/repos/erichuanp/voice-cmds/releases/latest",
+        timeout=10,
+    )
+    r.raise_for_status()
+    return str(r.json()["tag_name"])
+
+
 class SettingsDialog(QDialog):
     config_changed = Signal()
+    update_checked = Signal(str, str)  # (latest_tag, error)
 
     def __init__(self, config, debug: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -132,6 +163,9 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_general_tab(), "通用")
         tabs.addTab(self._build_commands_tab(), "命令")
+        tabs.addTab(self._build_about_tab(), "关于")
+
+        self.update_checked.connect(self._on_update_checked)
 
         save_btn = QPushButton("保存")
         cancel_btn = QPushButton("取消")
@@ -397,6 +431,82 @@ class SettingsDialog(QDialog):
             self, "导入",
             f"导入完成：新增 {ok} 条，跳过 {skipped} 条无效行。\n（点“保存”后生效）",
         )
+
+    # --- About tab --------------------------------------------------------
+    def _build_about_tab(self) -> QWidget:
+        from .. import __version__ as app_version
+
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(10)
+
+        title = QLabel(f"voice-cmds {app_version}")
+        title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        v.addWidget(title)
+
+        lic = QLabel(
+            "本软件基于 MIT 协议开源：使用时必须保留署名，并邮件通知作者相关链接"
+            "（erichuanp@gmail.com）；除此之外可自由使用、修改与分发。"
+        )
+        lic.setWordWrap(True)
+        v.addWidget(lic)
+
+        links = QLabel(
+            '项目主页 / Releases：<a href="https://github.com/erichuanp/voice-cmds/releases">'
+            'github.com/erichuanp/voice-cmds/releases</a><br/>'
+            '作者主页：<a href="https://github.com/erichuanp">github.com/erichuanp</a><br/>'
+            '提建议 / 讨论：<a href="mailto:erichuanp@gmail.com">erichuanp@gmail.com</a>'
+        )
+        links.setOpenExternalLinks(True)
+        v.addWidget(links)
+
+        row = QHBoxLayout()
+        self.check_btn = QPushButton("检查更新")
+        self.check_btn.clicked.connect(self._check_update)
+        self.update_status = QLabel("")
+        self.update_btn = QPushButton("更新到最新版本")
+        self.update_btn.setEnabled(False)  # auto-update not implemented yet
+        self.update_btn.setToolTip("自动更新功能开发中")
+        self.update_btn.hide()
+        row.addWidget(self.check_btn)
+        row.addWidget(self.update_status)
+        row.addWidget(self.update_btn)
+        row.addStretch(1)
+        v.addLayout(row)
+        v.addStretch(1)
+        return w
+
+    def _check_update(self) -> None:
+        self.update_status.setText("正在检查…")
+        self.update_status.setStyleSheet("color:#808080;")
+        self.check_btn.setEnabled(False)
+
+        def worker():
+            try:
+                self.update_checked.emit(fetch_latest_version(), "")
+            except Exception as e:
+                self.update_checked.emit("", str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(str, str)
+    def _on_update_checked(self, latest: str, error: str) -> None:
+        from .. import __version__ as cur
+
+        self.check_btn.setEnabled(True)
+        if error:
+            self.update_status.setText("检查失败：网络不可用")
+            self.update_status.setStyleSheet("color:#c62828;")
+            return
+        if compare_versions(cur, latest) >= 0:
+            self.update_status.setText("已经是最新版本")
+            self.update_status.setStyleSheet("color:#00C853;")
+            self.update_btn.hide()
+        else:
+            self.update_status.setText(f"发现新版本 {latest}")
+            self.update_status.setStyleSheet("color:#808080;")
+            self.update_btn.show()
 
     # --- save -------------------------------------------------------------
     def _save(self) -> None:

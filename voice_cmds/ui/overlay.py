@@ -120,6 +120,7 @@ class OverlayWindow(QWidget):
         self._text: str = ""
         self._result_ok: bool = True
         self._spinner_angle_deg: float = 0.0
+        self._editable: bool = False
 
         super().__init__(None)
         self.s = settings
@@ -132,6 +133,17 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+
+        # Inline editor for voice+typing mode (hotkey stop only).
+        from PySide6.QtWidgets import QLineEdit
+
+        self._editor = QLineEdit(self)
+        self._editor.setStyleSheet(
+            "QLineEdit { background: transparent; border: none; color: white; }"
+        )
+        self._editor.setAlignment(Qt.AlignCenter)
+        self._editor.setFont(QFont("Microsoft YaHei UI", self.font_pt))
+        self._editor.hide()
 
         # Detect display refresh rate for buttery animations
         screen = QGuiApplication.primaryScreen()
@@ -192,19 +204,44 @@ class OverlayWindow(QWidget):
         x = (wa.left + wa.right) // 2 - w // 2
         y = wa.bottom - h - self.bottom_offset
         self.move(x, y)
+        # Keep the inline editor inside the capsule body.
+        pad = max(4, self.shadow_margin + self.diameter // 6)
+        self._editor.setGeometry(
+            self.shadow_margin + pad,
+            self.shadow_margin + 2,
+            max(self.diameter, self._capsule_width - 2 * pad),
+            self.diameter - 4,
+        )
 
     # --- public state transitions ---
-    def show_recording(self) -> None:
+    def show_recording(self, editable: bool = False) -> None:
         self._state = State.RECORDING
         self._text = ""
+        self._editable = editable
         self._anim.stop()
         self._spinner_timer.stop()
         self._auto_hide_timer.stop()
         self._capsule_width = self.diameter
+        self._editor.clear()
+        self._set_accept_focus(editable)
         self._reposition()
         self.show()
         self.raise_()
+        if editable:
+            self._editor.show()
+            self._editor.setFocus()
+        else:
+            self._editor.hide()
         self.update()
+
+    def _set_accept_focus(self, accept: bool) -> None:
+        """The overlay normally refuses focus; recording-with-typing needs it."""
+        flags = self.windowFlags()
+        if accept:
+            flags &= ~Qt.WindowDoesNotAcceptFocus
+        else:
+            flags |= Qt.WindowDoesNotAcceptFocus
+        self.setWindowFlags(flags)
 
     def update_text(self, text: str) -> None:
         if self._state != State.RECORDING:
@@ -212,10 +249,36 @@ class OverlayWindow(QWidget):
         self._text = text
         self._animate_width(self._target_capsule_width(text))
 
+    def append_partial(self, delta: str) -> None:
+        """Voice partial inserts at the cursor position (typed text stays).
+
+        QLineEdit.insert() actually appends in PySide6, so insert manually
+        around the cursor position.
+        """
+        if (
+            not delta
+            or not self._editable
+            or self._state not in (State.RECORDING, State.PROCESSING)
+        ):
+            return
+        pos = self._editor.cursorPosition()
+        text = self._editor.text()
+        self._editor.setText(text[:pos] + delta + text[pos:])
+        self._editor.setCursorPosition(pos + len(delta))
+        self._text = self._editor.text()
+        self._animate_width(self._target_capsule_width(self._text))
+
+    def current_text(self) -> str:
+        """The full editable text (or the painted text in non-editable mode)."""
+        if self._editable:
+            return self._editor.text().strip()
+        return self._text
+
     def show_processing(self) -> None:
         self._state = State.PROCESSING
         self._spinner_angle_deg = 0.0
         self._spinner_elapsed.restart()
+        self._editor.hide()
         if not self._spinner_timer.isActive():
             self._spinner_timer.start()
         self.update()
@@ -229,6 +292,7 @@ class OverlayWindow(QWidget):
         self._state = State.RESULT
         self._result_ok = ok
         self._text = text
+        self._editor.hide()
         self._spinner_timer.stop()
         self._auto_hide_timer.stop()
         self._animate_width(self._target_capsule_width(text))
@@ -238,6 +302,8 @@ class OverlayWindow(QWidget):
         self._state = State.SUCCESS
         self._spinner_timer.stop()
         self._text = ""
+        self._editor.hide()
+        self._set_accept_focus(False)
         self._animate_width(self.diameter)
         self.update()
         self._auto_hide_timer.start(2000)
@@ -246,6 +312,8 @@ class OverlayWindow(QWidget):
         self._state = State.ERROR
         self._spinner_timer.stop()
         self._text = ""
+        self._editor.hide()
+        self._set_accept_focus(False)
         self._animate_width(self.diameter)
         self.update()
         self._auto_hide_timer.start(2000)
@@ -255,6 +323,8 @@ class OverlayWindow(QWidget):
         self._spinner_timer.stop()
         self._auto_hide_timer.stop()
         self._anim.stop()
+        self._editor.hide()
+        self._set_accept_focus(False)
         self.hide()
 
     # --- animation helpers ---
@@ -328,8 +398,13 @@ class OverlayWindow(QWidget):
         body.addRoundedRect(capsule_rect, self.diameter / 2.0, self.diameter / 2.0)
         p.fillPath(body, color)
 
-        # Foreground content
-        if self._text and self._state in (State.RECORDING, State.RESULT):
+        # Foreground content (the inline editor draws its own text when
+        # recording in editable mode)
+        if (
+            self._text
+            and self._state in (State.RECORDING, State.RESULT)
+            and not (self._state == State.RECORDING and self._editable)
+        ):
             p.setPen(Qt.white)
             p.setFont(QFont("Microsoft YaHei UI", self.font_pt))
             text_rect = capsule_rect.adjusted(12, 0, -12, 0).toRect()
