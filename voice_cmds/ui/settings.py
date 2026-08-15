@@ -1,4 +1,9 @@
-"""Settings dialog: hotkeys, stop mode, custom commands CRUD, apps CRUD, sound toggles."""
+"""Settings dialog: hotkeys, recognition, sounds, autostart and commands.
+
+Layout follows one convention everywhere: QFormLayout rows inside named
+QGroupBox sections, gray hint() labels for secondary info, and plain
+Chinese 保存/取消 buttons (no mixed-language QDialogButtonBox).
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
@@ -6,9 +11,9 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,17 +28,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .common import DIALOG_STYLE, hint
+
 
 class _CommandDialog(QDialog):
-    """Add/edit one entry: either '打开<触发词>' (launch an app) or a plain
-    '触发词' custom command (script or exe). App triggers may list several
-    aliases separated by ';' or '；' — 打开A and 打开B then open the same thing."""
+    """Add/edit one entry: 「打开<触发词>」 (app) or 「触发词」 (script/exe).
+
+    App triggers support aliases separated by ';' / '；' — 打开A and 打开B
+    then open the same thing.
+    """
 
     def __init__(self, parent=None, entry: dict | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("自定义命令")
+        self.setWindowTitle("添加命令" if entry is None else "编辑命令")
+        self.setStyleSheet(DIALOG_STYLE)
+        self.resize(460, 210)
         entry = entry or {}
-        self.kind = entry.get("kind", "custom")  # 'app' | 'custom'
+        self.kind = entry.get("kind", "custom")
 
         self.radio_app = QRadioButton("打开<触发词>")
         self.radio_cmd = QRadioButton("触发词")
@@ -41,10 +52,12 @@ class _CommandDialog(QDialog):
         self.radio_cmd.setChecked(self.kind != "app")
 
         self.trigger = QLineEdit(entry.get("trigger", ""))
-        self.trigger.setToolTip("“打开”模式支持用 ; 或 ；分隔多个触发词：打开A / 打开B 都打开同一个")
+        self.trigger.setPlaceholderText("例如：微信；weixin")
         self.path = QLineEdit(entry.get("path", entry.get("script", "")))
         self.args = QLineEdit(" ".join(entry.get("args", []) or []))
+        self.args.setPlaceholderText("空格分隔")
         browse = QPushButton("浏览…")
+        browse.setMinimumWidth(64)
         browse.clicked.connect(self._browse)
 
         kind_row = QHBoxLayout()
@@ -52,34 +65,42 @@ class _CommandDialog(QDialog):
         kind_row.addWidget(self.radio_cmd)
         kind_row.addStretch(1)
 
+        path_row = QHBoxLayout()
+        path_row.addWidget(self.path, 1)
+        path_row.addWidget(browse)
+
         form = QFormLayout()
+        form.setContentsMargins(16, 16, 16, 8)
+        form.setHorizontalSpacing(16)
+        form.setVerticalSpacing(10)
         form.addRow("类型", kind_row)
         form.addRow("触发词", self.trigger)
-        path_row = QHBoxLayout()
-        path_row.addWidget(self.path)
-        path_row.addWidget(browse)
-        path_widget = QWidget()
-        path_widget.setLayout(path_row)
-        form.addRow("路径", path_widget)
-        form.addRow("附加参数（空格分隔）", self.args)
+        form.addRow("路径", path_row)
+        form.addRow("附加参数", self.args)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        save_btn = QPushButton("保存")
+        cancel_btn = QPushButton("取消")
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(16, 8, 16, 16)
+        btn_row.addWidget(hint("“打开<触发词>”的触发词支持 ; 或 ；分隔多个别名"))
+        btn_row.addStretch(1)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addLayout(form)
-        layout.addWidget(buttons)
+        layout.addLayout(btn_row)
 
     def _browse(self) -> None:
-        if self.radio_app.isChecked():
-            path, _ = QFileDialog.getOpenFileName(
-                self, "选择应用", "", "Executables (*.exe);;All files (*.*)"
-            )
-        else:
-            path, _ = QFileDialog.getOpenFileName(
-                self, "选择脚本或程序", "",
-                "脚本与程序 (*.bat *.cmd *.ps1 *.py *.exe);;All files (*.*)",
-            )
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择程序或脚本", "",
+            "程序与脚本 (*.bat *.cmd *.ps1 *.py *.exe *.lnk);;All files (*.*)",
+        )
         if path:
             self.path.setText(path)
 
@@ -99,51 +120,75 @@ class SettingsDialog(QDialog):
 
     def __init__(self, config, debug: bool = False, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("voice-cmds 设置")
+        self.setWindowTitle("设置")
+        self.setStyleSheet(DIALOG_STYLE)
         self.config = config
         self.debug = debug
-        self.resize(560, 520)
+        self.resize(560, 540)
 
         tabs = QTabWidget()
         tabs.addTab(self._build_general_tab(), "通用")
-        tabs.addTab(self._build_commands_tab(), "自定义命令")
+        tabs.addTab(self._build_commands_tab(), "命令")
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
+        save_btn = QPushButton("保存")
+        cancel_btn = QPushButton("取消")
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(self._save)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(tabs)
-        layout.addWidget(buttons)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        layout.addWidget(tabs, 1)
+        layout.addLayout(btn_row)
 
-    # --- General tab ---
+    # --- General tab ------------------------------------------------------
     def _build_general_tab(self) -> QWidget:
         s = self.config.settings
         w = QWidget()
-        form = QFormLayout(w)
+        v = QVBoxLayout(w)
+        v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(10)
+
+        # 热键
+        hotkey_box = QGroupBox("热键")
+        f = QFormLayout(hotkey_box)
+        f.setHorizontalSpacing(16)
+        f.setVerticalSpacing(8)
         self.start_key = QLineEdit(s["hotkey"]["start"])
         self.stop_key = QLineEdit(s["hotkey"]["stop"])
         self.cancel_key = QLineEdit(s["hotkey"]["cancel"])
-        form.addRow("启动热键", self.start_key)
-        form.addRow("停止热键 (录音中)", self.stop_key)
-        form.addRow("取消热键 (录音中)", self.cancel_key)
+        f.addRow("开始录音", self.start_key)
+        f.addRow("结束识别", self.stop_key)
+        f.addRow("取消", self.cancel_key)
+        v.addWidget(hotkey_box)
 
+        # 识别
+        rec_box = QGroupBox("识别")
+        f = QFormLayout(rec_box)
+        f.setHorizontalSpacing(16)
+        f.setVerticalSpacing(8)
         self.stop_mode = QComboBox()
-        self.stop_mode.addItem("静音自动停止（说完停 0.5 秒执行）", "vad")
-        self.stop_mode.addItem("热键停止（按停止键结束）", "hotkey")
-        current = s.get("stop_mode", "vad")
-        idx = self.stop_mode.findData(current)
+        self.stop_mode.addItem("静音自动停止", "vad")
+        self.stop_mode.addItem("热键停止", "hotkey")
+        idx = self.stop_mode.findData(s.get("stop_mode", "vad"))
         self.stop_mode.setCurrentIndex(max(0, idx))
-        form.addRow("停止模式", self.stop_mode)
+        f.addRow("结束方式", self.stop_mode)
 
         self.vad_ms = QSpinBox()
         self.vad_ms.setRange(200, 5000)
         self.vad_ms.setSingleStep(100)
         self.vad_ms.setValue(s.get("vad_silence_ms", 500))
         self.vad_ms.setSuffix(" ms")
-        form.addRow("VAD 静音时长", self.vad_ms)
-        form.addRow(
-            QLabel('<span style="color:#999;">VAD 模式下停止键 / Esc 依然有效，可随时手动结束。</span>')
+        f.addRow("静音时长", self.vad_ms)
+        self._vad_hint = hint(self._vad_hint_text(self.vad_ms.value()))
+        f.addRow("", self._vad_hint)
+        self.vad_ms.valueChanged.connect(
+            lambda ms: self._vad_hint.setText(self._vad_hint_text(ms))
         )
 
         self.result_ms = QSpinBox()
@@ -151,47 +196,69 @@ class SettingsDialog(QDialog):
         self.result_ms.setSingleStep(100)
         self.result_ms.setValue(int(s.get("ui", {}).get("result_text_ms", 1000)))
         self.result_ms.setSuffix(" ms")
-        form.addRow("识别结果展示时长", self.result_ms)
-        form.addRow(
-            QLabel('<span style="color:#999;">识别文本停留多久后再执行命令（单位：毫秒，0 表示立即执行）。</span>')
-        )
+        f.addRow("结果展示时长", self.result_ms)
+        f.addRow("", hint("识别结果停留多久后再执行命令（0 = 立即执行）"))
 
         self.max_chars = QSpinBox()
         self.max_chars.setRange(3, 50)
         self.max_chars.setValue(s["max_chars"])
-        form.addRow("最长识别字符数", self.max_chars)
+        f.addRow("最长识别字符数", self.max_chars)
+        f.addRow("", hint("识别达到该字数立即结束"))
+        v.addWidget(rec_box)
 
+        # 系统
+        sys_box = QGroupBox("系统")
+        f = QFormLayout(sys_box)
+        f.setHorizontalSpacing(16)
+        f.setVerticalSpacing(8)
         self.shutdown_delay = QSpinBox()
         self.shutdown_delay.setRange(0, 300)
         self.shutdown_delay.setValue(s["shutdown_delay_seconds"])
         self.shutdown_delay.setSuffix(" s")
-        form.addRow("关机/重启倒计时", self.shutdown_delay)
+        f.addRow("关机/重启倒计时", self.shutdown_delay)
+        v.addWidget(sys_box)
 
-        self.sound_success = QCheckBox("启用成功提示音")
+        # 提示音
+        sound_box = QGroupBox("提示音")
+        f = QFormLayout(sound_box)
+        f.setHorizontalSpacing(16)
+        f.setVerticalSpacing(8)
+        self.sound_success = QCheckBox("成功提示音")
         self.sound_success.setChecked(s["sound"]["success_enabled"])
-        self.sound_error = QCheckBox("启用失败提示音")
+        self.sound_error = QCheckBox("失败提示音")
         self.sound_error.setChecked(s["sound"]["error_enabled"])
-        form.addRow("", self.sound_success)
-        form.addRow("", self.sound_error)
+        f.addRow("", self.sound_success)
+        f.addRow("", self.sound_error)
+        v.addWidget(sound_box)
 
-        # Autostart
+        # 启动
+        boot_box = QGroupBox("启动")
+        f = QFormLayout(boot_box)
+        f.setHorizontalSpacing(16)
+        f.setVerticalSpacing(8)
         from .. import autostart
         self.autostart_check = QCheckBox("开机自启动")
         self.autostart_check.setChecked(autostart.is_enabled())
+        f.addRow("", self.autostart_check)
         if self.debug:
             self.autostart_check.setEnabled(False)
-            self.autostart_check.setToolTip("--debug 模式下不会修改开机启动项")
-        form.addRow("", self.autostart_check)
-        if self.debug:
-            form.addRow(QLabel('<span style="color:#999;">debug 模式：开机自启动项被锁定</span>'))
+            f.addRow("", hint("调试模式下不修改开机启动项"))
+        v.addWidget(boot_box)
 
-        form.addRow(QLabel("<i>保存后程序会自动重启以应用更改。</i>"))
+        v.addWidget(hint("保存后程序自动重启以应用更改。"))
+        v.addStretch(1)
         return w
 
-    # --- Commands tab (merged: '打开 X' apps + plain custom commands) ---
+    @staticmethod
+    def _vad_hint_text(ms: int) -> str:
+        return f"识别到内容后静音达到 {ms} ms 自动结束；停止/取消热键始终可用。"
+
+    # --- Commands tab (merged: 打开 X + 脚本/程序) ------------------------
     def _build_commands_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         self.cmd_list = QListWidget()
         for entry in self.config.apps:
             self._add_cmd_item({**entry, "kind": "app"})
@@ -208,7 +275,11 @@ class SettingsDialog(QDialog):
         btns.addWidget(edit)
         btns.addWidget(rm)
         btns.addStretch(1)
-        layout.addWidget(self.cmd_list)
+        layout.addWidget(hint(
+            "「打开<触发词>」用于启动程序（触发词可用 ; 或 ；分隔多个别名）；"
+            "「触发词」用于脚本或程序（.bat/.cmd/.ps1/.py/.exe/.lnk）。"
+        ))
+        layout.addWidget(self.cmd_list, 1)
         layout.addLayout(btns)
         return w
 
@@ -248,7 +319,7 @@ class SettingsDialog(QDialog):
         if row >= 0:
             self.cmd_list.takeItem(row)
 
-    # --- save ---
+    # --- save -------------------------------------------------------------
     def _save(self) -> None:
         s = self.config.settings
         s["hotkey"]["start"] = self.start_key.text().strip()

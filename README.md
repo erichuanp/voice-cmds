@@ -54,7 +54,7 @@ Tray **帮助** lists every available command.
 
 - **打开 X**: tray → 设置 → 自定义命令 → 添加 → 选“打开<触发词>”。触发词支持 `;`/`；` 多别名（`code;vs` → 打开code 和 打开vs 是同一个）
 - **Custom scripts / programs**: tray → 设置 → 自定义命令 → 添加 → 选“触发词”，路径支持 `.bat` / `.ps1` / `.py` / `.exe`
-- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`, `config/tasks.json`. Tray → "重新加载配置" picks up changes (saving from the Settings dialog auto-restarts the app).
+- **Direct file editing**: `config/settings.json`, `config/apps.json`, `config/commands.json`, `config/tasks.json`. 编辑后重启程序生效（在设置窗口内保存会自动重启）。
 
 ## Matching
 

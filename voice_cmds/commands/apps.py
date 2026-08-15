@@ -14,9 +14,15 @@ def open_app(entry: dict, logger: logging.Logger) -> None:
     exe = Path(path).expanduser()
     if not exe.exists():
         raise FileNotFoundError(
-            f"应用不存在: {exe}\n（请在 托盘 → 设置 → 打开 (Apps) 中修正路径）"
+            f"应用不存在: {exe}\n（请在 托盘 → 设置 → 命令 中修正路径）"
         )
     cmd = [str(exe), *args]
     logger.info("Launch app: %s", cmd)
-    # No CREATE_NO_WINDOW so GUI apps appear normally
-    subprocess.Popen(cmd, shell=False)
+    if exe.suffix.lower() == ".exe":
+        # No CREATE_NO_WINDOW so GUI apps appear normally
+        subprocess.Popen(cmd, shell=False)
+    else:
+        # .bat/.cmd/.ps1/.py/.lnk — dispatch through cmd.exe, which resolves
+        # shortcuts and file associations the way double-clicking does.
+        cmd_str = subprocess.list2cmdline(cmd)
+        subprocess.Popen(cmd_str, shell=True)

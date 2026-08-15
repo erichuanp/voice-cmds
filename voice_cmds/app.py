@@ -93,7 +93,6 @@ class VoiceCmdsApp(QObject):
         self.tray.settings_requested.connect(self._open_settings)
         self.tray.help_requested.connect(self._show_help)
         self.tray.tasks_requested.connect(self._open_tasks)
-        self.tray.reload_requested.connect(self._reload_config)
         self.tray.exit_requested.connect(self.shutdown)
 
     # --- hotkey handlers ---
@@ -312,11 +311,9 @@ class VoiceCmdsApp(QObject):
     @Slot()
     def _show_help(self) -> None:
         try:
-            box = QMessageBox()
-            box.setWindowTitle("voice-cmds — 帮助")
-            box.setTextFormat(Qt.TextFormat.RichText)
-            box.setText(self.matcher.help_text())
-            box.exec()
+            from .ui.help import HelpDialog
+
+            HelpDialog(self.matcher.help_text(), parent=None).exec()
         except Exception:
             self.logger.exception("Failed to show help dialog")
 
@@ -331,16 +328,6 @@ class VoiceCmdsApp(QObject):
             self._tasks_win.activateWindow()
         except Exception:
             self.logger.exception("Failed to open tasks window")
-
-    @Slot()
-    def _reload_config(self) -> None:
-        # Tray "重新加载配置" — soft reload only (no restart).
-        self.config.reload()
-        self.matcher.reload()
-        self.logger.info("Config reloaded (soft)")
-        QMessageBox.information(
-            None, "voice-cmds", "配置已重新加载。\n（修改热键需要重启程序）"
-        )
 
     @Slot()
     def _restart_after_save(self) -> None:

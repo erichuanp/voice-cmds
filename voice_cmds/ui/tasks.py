@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from ..matcher import format_delay
 from ..scheduler import Task
+from .common import DIALOG_STYLE, hint
 
 
 def _status_icon(ok: bool) -> QIcon:
@@ -69,7 +70,8 @@ class TaskEditDialog(QDialog):
         self.scheduler = scheduler
         self.task = task
         self.setWindowTitle("添加定时任务" if task is None else "编辑定时任务")
-        self.resize(430, 240)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.resize(430, 230)
 
         # --- timed switch + datetime ---
         self.timed_check = QCheckBox("定时")
@@ -96,7 +98,7 @@ class TaskEditDialog(QDialog):
         delay_row.addWidget(self.h_spin)
         delay_row.addWidget(self.m_spin)
         delay_row.addWidget(self.s_spin)
-        self._delay_label = QLabel("后执行（自添加起计）")
+        self._delay_label = QLabel("后执行（从添加时起算）")
         delay_row.addWidget(self._delay_label)
         delay_row.addStretch(1)
         self._delay_row_widgets = [self.h_spin, self.m_spin, self.s_spin]
@@ -115,7 +117,10 @@ class TaskEditDialog(QDialog):
         run_btn.clicked.connect(self._run_now)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
         timed_row = QHBoxLayout()
+        timed_row.setSpacing(10)
         timed_row.addWidget(self.timed_check)
         timed_row.addWidget(self.dt_edit)
         timed_row.addWidget(self.repeat_check)
@@ -259,6 +264,7 @@ class TasksWindow(QDialog):
         super().__init__(parent)
         self.scheduler = scheduler
         self.setWindowTitle("定时任务")
+        self.setStyleSheet(DIALOG_STYLE)
         self.resize(560, 360)
 
         self.tree = QTreeWidget()
@@ -274,7 +280,7 @@ class TasksWindow(QDialog):
         header.setSectionResizeMode(2, QHeaderView.Stretch)
 
         add_btn = QPushButton("添加")
-        clear_btn = QPushButton("删除全部已执行/失败任务")
+        clear_btn = QPushButton("删除已完成与失败的任务")
         close_btn = QPushButton("关闭")
         add_btn.clicked.connect(lambda: self._open_editor(None))
         clear_btn.clicked.connect(self._remove_finished)
@@ -287,7 +293,12 @@ class TasksWindow(QDialog):
         btn_row.addWidget(close_btn)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self.tree)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(hint(
+            "右键任务行可编辑或删除；仅一次性任务执行后显示 ✓ / ✗（悬停 ✗ 查看失败原因）。"
+        ))
+        layout.addWidget(self.tree, 1)
         layout.addLayout(btn_row)
 
         self.scheduler.tasks_changed.connect(self.refresh)
@@ -374,4 +385,4 @@ class TasksWindow(QDialog):
     def _remove_finished(self) -> None:
         removed = self.scheduler.remove_finished()
         if removed == 0:
-            QMessageBox.information(self, "voice-cmds", "没有已执行/失败的任务。")
+            QMessageBox.information(self, "voice-cmds", "没有已完成或失败的任务。")

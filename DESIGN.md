@@ -66,7 +66,7 @@ voice-cmds/
 │   ├── settings.json         ← 全局设置
 │   ├── apps.json             ← "打开 XX" 触发词→路径
 │   ├── commands.json         ← 自定义命令触发词→脚本
-│   └── tasks.json            ← 定时任务（§7.4）
+│   └── tasks.json            ← 定时任务（§7.3）
 │   # hot_words.json removed in 0.2 — replaced by embedding-only fallback
 ├── assets/
 │   ├── tray.ico
@@ -164,7 +164,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 四层（按顺序，全部在 `matcher.py`）：
 
 0. **“打开 X”路径**：只与 X 相关的应用触发词匹配（字面 → 拼音 → 原文）
-1. **定时模式**：`<时间>后<命令>` → kind=`schedule`，交由调度器延迟执行（§7.4）。时间支持阿拉伯/中文数字（时 0–167，分/秒 0–59，超范围不匹配 → 红叉）
+1. **定时模式**：`<时间>后<命令>` → kind=`schedule`，交由调度器延迟执行（§7.3）。时间支持阿拉伯/中文数字（时 0–167，分/秒 0–59，超范围不匹配 → 红叉）
 2. **字面完全匹配** → 命中即执行
 3. **拼音+声调 embedding**：文本先转 `拼音+声调`（`清空回收站 → qing1kong1hui2shou1zhan4`）再编码，余弦相似度 ≥ `pinyin_similarity_threshold`（默认 **0.88**）命中。STT 同音误识别因此能以极高相似度命中（“晴空挥手站 → qing2kong1hui1shou3zhan4”，sim ≈ 0.99；“锁屏/所评”sim = 1.0）
 4. **原文 embedding 兜底**：≥ `embedding_similarity_threshold`（默认 0.85）命中，覆盖与读音无关的语义变体
@@ -198,7 +198,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 > **如果某条实现遇阻**：先注册触发词入口，但执行体替换为「占位提示音」（播 `assets/success.wav`）+ 日志记录 "TODO"，不阻塞整体上线。
 
-### 7.4 定时任务（`scheduler.py` + `ui/tasks.py`）
+### 7.3 定时任务（`scheduler.py` + `ui/tasks.py`）
 
 - **语音语法**：`<时间>后<命令>`，如 `3小时后打开资源管理器`、`一小时四十一分十二秒后锁屏`、`半小时后静音`、`十五秒后关机`。
   - 时间 = 若干 `数字+单位` 片段（单位：小时/钟头/时、分钟/分、秒；支持“半”“两”及中文数字 0–99/百）。
@@ -219,32 +219,26 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 - **“取消关机”**：`shutdown /a` 之外同时取消所有未执行且命令匹配 关机/重启 的定时任务。
 - **语音添加反馈**：与执行命令共用 `result_text_ms` 等待——先显示识别原文 X ms，之后才注册任务；随后胶囊显示 `已定时：<时间>后 <命令>`（2s）+ 托盘气泡「已添加定时任务：<时间>后 <命令>」。
 
-### 7.2 用户自定义命令（`config/commands.json`）
+### 7.2 命令（自定义命令与「打开」已合并）
+
+「打开 X」与自定义命令的实现相近，统一在**设置 → 命令**页管理，添加弹窗第一行为单选：
+
+| 单选 | 说法规则 | 例（触发词填 `code`） | 存储 |
+|---|---|---|---|
+| **打开<触发词>** | 必须说「打开code」才执行 | `打开 code` | `apps.json`（key: `path`） |
+| **触发词** | 必须说「code」才执行 | `code` | `commands.json`（key: `script`） |
+
+- 单选只影响**触发词的说法规则**；下面的**路径**与**附加参数**两种模式共用。
+- 路径选择器支持 `.bat / .cmd / .ps1 / .py / .exe / .lnk`（.lnk 经 cmd.exe 解析快捷方式）。
+- 「打开<触发词>」的触发词支持 `;` / `；` 多别名：`code;vs` → 说「打开code」和「打开vs」打开同一个东西。
+- 匹配器规则：app 条目**只**通过「打开 X」路径命中（不参与裸触发词字面/embedding 匹配）；custom 条目只在一般触发词集合中。
 
 ```json
-[
-  {"trigger": "吃饭", "script": "scripts/del_des_png.bat", "args": []}
-]
+// config/apps.json
+[{"trigger": "code;vs", "path": "C:\\...\\Code.exe", "args": []}]
+// config/commands.json
+[{"trigger": "吃饭", "script": "scripts/del_des_png.bat", "args": []}]
 ```
-
-设置窗口提供 **添加 / 编辑 / 删除**。脚本路径相对项目根目录；路径选择器支持 `.bat / .cmd / .ps1 / .py / .exe`。
-
-### 7.3 「打开」命令（`config/apps.json`）
-
-特殊语法：`打开 <触发词>` —— 解析器拆出动词 `打开` 后查 apps.json。
-
-```json
-[
-  {"trigger": "code;vs", "path": "C:\\...\\Code.exe", "args": ["."]},
-  {"trigger": "微信", "path": "C:\\...\\WeChat.exe", "args": []}
-]
-```
-
-- **触发词多别名**：用 `;` 或 `；` 分隔（`code;vs` → 说「打开code」和「打开vs」打开同一个东西）。
-- **设置 UI（合并）**：自定义命令页统一管理「打开 X」与普通脚本命令——添加弹窗内单选：
-  - 「打开<触发词>」：路径为可执行文件（选择器过滤 `*.exe`），存入 `apps.json`
-  - 「触发词」：路径为脚本或程序（`.bat/.cmd/.ps1/.py/.exe`），存入 `commands.json`
-  - 附加参数不变。
 
 ---
 
@@ -285,14 +279,13 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 ### 8.2 设置窗口（暴露的项）
 
 - 修改三组热键
-- **停止模式**（hotkey / vad）+ VAD 静音时长（默认 500ms，范围 200–5000ms）
-- **识别结果展示时长**（默认 1000ms，范围 0–10000ms；0 = 识别后立即执行）
-- **自定义命令（合并）**：CRUD「打开 X」与普通脚本命令（§7.2 / §7.3，添加弹窗内单选类型）
+- **停止模式**（hotkey / vad）+ 静音时长（默认 500ms，范围 200–5000ms）
+- **结果展示时长**（默认 1000ms，范围 0–10000ms；0 = 识别后立即执行）
+- **命令页（合并）**：统一管理「打开 X」与自定义命令（§7.2，添加弹窗内单选决定触发词规则）
 - 提示音开关
 - 开机自启动（debug 模式锁定）
-- _未来扩展项位置_：用户提到"还在想"，预留菜单项
 
-托盘菜单：**设置 / 帮助 / 定时任务 / 重新加载配置 / 退出**。「帮助」弹窗列出全部内置命令、定时任务语法与「打开 X」可用触发词；「定时任务」打开任务列表（§7.4）。
+托盘菜单：**设置 / 帮助 / 定时任务 / 退出**。「帮助」为独立窗口，列出当前热键、结束方式、全部内置命令、定时任务语法、打开/自定义命令与匹配规则；「定时任务」打开任务列表（§7.3）。
 
 ---
 

@@ -224,13 +224,15 @@ class CommandMatcher:
             )
         # Apps: trigger may list aliases separated by ';' / '；' —
         # "code;vs" registers 打开code and 打开vs to the same entry.
+        # App entries are matched ONLY through the "打开 X" path.
         self.app_triggers = {}
         for entry in self.config.apps:
             for alias in _split_aliases(entry.get("trigger", "")):
                 self.app_triggers[alias] = entry
 
-        # Pre-encode all triggers (system + custom + apps): toned pinyin + raw
-        self._all_trigger_list = [s.trigger for s in self.specs] + list(self.app_triggers)
+        # Pre-encode all triggers: system + custom (apps live only in the
+        # "打开 X" path, so they are not in the general set).
+        self._all_trigger_list = [s.trigger for s in self.specs]
         if self._all_trigger_list:
             pinyin_list = [_to_toned_pinyin(t) for t in self._all_trigger_list]
             self._all_pinyin_embeddings = self.embedder.encode(
@@ -280,6 +282,11 @@ class CommandMatcher:
             r = self._match_app(arg)
             if r:
                 return r
+            # The 打开 prefix is part of the trigger intent: after the app
+            # path fails, only triggers that themselves start with 打开
+            # (e.g. the built-in 打开资源管理器) stay eligible — a bare
+            # custom trigger like "code" must not answer to "打开 code".
+            return self._match_open_prefixed(text)
 
         # 1. Timed task pattern: "<时间>后<命令>" — e.g. "三小时后打开资源管理器",
         #    "3小时30分15秒后锁屏". Returns a schedule command (executed by the
@@ -299,19 +306,45 @@ class CommandMatcher:
                 arg=str(delay_s),
             )
 
-        # 2. Literal full match against any trigger (commands or apps)
+        # 2. Literal full match against any trigger (system or custom)
         for s in self.specs:
             if text == s.trigger:
                 return MatchResult(s, "literal", 1.0)
-        if text in self.app_triggers:
-            entry = self.app_triggers[text]
-            return MatchResult(
-                CommandSpec(text, "app", entry), "literal", 1.0, arg=text
-            )
 
         # 3. Toned-pinyin embedding, then raw-text embedding fallback
         threshold = self.config.settings["match"]["embedding_similarity_threshold"]
         return self._match_embedding(text, threshold)
+
+    def _match_open_prefixed(self, text: str) -> Optional[MatchResult]:
+        """Literal/pinyin/raw matching restricted to triggers starting with 打开."""
+        candidates = [s for s in self.specs if s.trigger.startswith(self.OPEN_VERB)]
+        if not candidates:
+            return None
+        for s in candidates:
+            if text == s.trigger:
+                return MatchResult(s, "literal", 1.0)
+        pinyin_threshold = self.config.settings["match"].get(
+            "pinyin_similarity_threshold", 0.88
+        )
+        raw_threshold = self.config.settings["match"]["embedding_similarity_threshold"]
+        trigs = [s.trigger for s in candidates]
+        q = self.embedder.encode(
+            [_to_toned_pinyin(text)], normalize_embeddings=True
+        )[0]
+        embs = self.embedder.encode(
+            [_to_toned_pinyin(t) for t in trigs], normalize_embeddings=True
+        )
+        sims = embs @ q
+        idx = int(sims.argmax())
+        if float(sims[idx]) >= pinyin_threshold:
+            return MatchResult(candidates[idx], "pinyin", float(sims[idx]))
+        q = self.embedder.encode([text], normalize_embeddings=True)[0]
+        embs = self.embedder.encode(trigs, normalize_embeddings=True)
+        sims = embs @ q
+        idx = int(sims.argmax())
+        if float(sims[idx]) >= raw_threshold:
+            return MatchResult(candidates[idx], "embedding", float(sims[idx]))
+        return None
 
     def _match_app(self, arg: str) -> Optional[MatchResult]:
         if not arg or not self.app_triggers:
@@ -396,11 +429,6 @@ class CommandMatcher:
 
     def _result_for_trigger(self, idx: int, layer: str, score: float) -> Optional[MatchResult]:
         trig = self._all_trigger_list[idx]
-        if trig in self.app_triggers:
-            entry = self.app_triggers[trig]
-            return MatchResult(
-                CommandSpec(trig, "app", entry), layer, score, arg=trig
-            )
         for s in self.specs:
             if s.trigger == trig:
                 return MatchResult(s, layer, score)
@@ -408,34 +436,47 @@ class CommandMatcher:
 
     # --- help text --------------------------------------------------------
     def help_text(self) -> str:
-        hotkeys = self.config.settings["hotkey"]
-        stop_mode = self.config.settings.get("stop_mode", "hotkey")
-        lines = [
-            "<h3>voice-cmds 使用帮助</h3>",
-            f"<b>开始录音：</b>{hotkeys['start']}（说一句命令）",
-            f"<b>结束：</b>{hotkeys['stop']}"
-            + ("　|　静音 0.5 秒自动执行" if stop_mode == "vad" else ""),
-            f"<b>取消：</b>{hotkeys['cancel']}（仅录音中）",
-            "<hr/>",
-            "<b>内置命令：</b>",
+        s = self.config.settings
+        hotkeys = s["hotkey"]
+        vad_ms = int(s.get("vad_silence_ms", 500))
+        result_ms = int(s.get("ui", {}).get("result_text_ms", 1000))
+        stop_mode = s.get("stop_mode", "vad")
+        py_thr = float(s["match"].get("pinyin_similarity_threshold", 0.88))
+        em_thr = float(s["match"]["embedding_similarity_threshold"])
+        if stop_mode == "vad":
+            stop_desc = f"静音达到 {vad_ms} ms 自动结束识别"
+        else:
+            stop_desc = f"按下结束键 {hotkeys['stop']} 结束识别"
+        parts = [
+            "<h3>使用方式</h3>",
+            "<ul>",
+            f"<li>开始录音：<b>{hotkeys['start']}</b></li>",
+            f"<li>结束识别：{stop_desc}</li>",
+            f"<li>取消（仅录音中）：<b>{hotkeys['cancel']}</b></li>",
+            f"<li>识别结果在胶囊中展示 {result_ms} ms，之后才执行命令</li>",
+            "</ul>",
+            "<h3>内置命令</h3>",
+            "<p>" + "、".join(sorted({sp.trigger for sp in self.specs if sp.kind == "system"})) + "</p>",
+            "<h3>定时任务</h3>",
+            "<ul>",
+            "<li>语音：&lt;时间&gt;后&lt;命令&gt;，例：3小时后打开资源管理器、半小时后静音、十五秒后关机</li>",
+            "<li>时间范围：小时 0–167，分钟 0–59，秒 0–59；支持阿拉伯与中文数字</li>",
+            "<li>托盘 → 定时任务：查看、编辑、删除任务；手动添加支持指定时刻、每日重复、循环执行</li>",
+            "<li>「取消关机」同时取消未执行的关机/重启定时任务</li>",
+            "</ul>",
         ]
-        system_triggers = sorted({s.trigger for s in self.specs if s.kind == "system"})
-        lines.append("、".join(system_triggers))
-        lines += [
-            "<br/><b>定时任务：</b>“&lt;时间&gt;后&lt;命令&gt;”，如“3小时后打开资源管理器”、“半小时后静音”、“一小时四十一分十二秒后锁屏”（时 0–167，分/秒 0–59，支持中文数字）",
-            "<br/><b>任务列表：</b>托盘 → 定时任务 可查看/编辑/删除任务，手动添加支持指定时刻、每日重复、循环执行；说“取消关机”会同时取消未执行的关机/重启任务",
+        apps = [a.get("trigger", "") for a in self.config.apps]
+        if apps:
+            parts += ["<h3>打开应用</h3>", "<p>打开&lt;触发词&gt;：" + "、".join(apps) + "</p>"]
+        customs = [c.get("trigger", "") for c in self.config.commands]
+        if customs:
+            parts += ["<h3>自定义命令</h3>", "<p>" + "、".join(customs) + "</p>"]
+        parts += [
+            "<h3>匹配方式</h3>",
+            "<p>按顺序：定时模式 → 打开 X → 字面匹配 → 拼音+声调相似度（≥"
+            f"{py_thr:.2f}）→ 语义相似度（≥{em_thr:.2f}）。识别与命令不完全一致也能命中。</p>",
         ]
-        if self.config.apps:
-            app_triggers = sorted(e["trigger"] for e in self.config.apps)
-            lines.append(f"<br/><b>打开应用：</b>“打开 X”（X 可以是：{'、'.join(app_triggers)}）")
-        if self.config.commands:
-            custom_triggers = sorted(e["trigger"] for e in self.config.commands)
-            lines.append(f"<br/><b>自定义命令：</b>{'、'.join(custom_triggers)}")
-        lines += [
-            "<hr/>",
-            "<i>识别结果与命令不完全一致也没关系：程序会按“字面 → 拼音+声调 → 语义”逐层模糊匹配。</i>",
-        ]
-        return "".join(lines)
+        return "".join(parts)
 
     def reload(self) -> None:
         self._rebuild()
