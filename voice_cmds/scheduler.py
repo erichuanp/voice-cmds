@@ -310,7 +310,9 @@ class TaskScheduler(QObject):
         if result is None:
             return False, "未匹配到命令"
         try:
-            self.executor.execute(result)
+            # grace=False: this task IS the delayed execution — don't start
+            # another grace timer (macOS shutdown/restart would loop).
+            self.executor.execute(result, grace=False)
             return True, ""
         except Exception as e:
             logger.exception("Scheduled execution error: %s", e)

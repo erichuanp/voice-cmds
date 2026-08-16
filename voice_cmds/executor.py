@@ -18,7 +18,9 @@ class CommandExecutor:
         self.logger = logger
         self.scheduler = scheduler
 
-    def execute(self, result: MatchResult) -> None:
+    def execute(self, result: MatchResult, grace: bool = True) -> None:
+        """Execute a match. `grace=False` skips the macOS shutdown grace
+        timer — used when the scheduler fires an already-delayed task."""
         spec = result.command
         self.logger.info(
             "Execute trigger=%r kind=%s layer=%s score=%.2f arg=%r",
@@ -26,10 +28,16 @@ class CommandExecutor:
         )
         if spec.kind == "system":
             fn = spec.payload["fn"]
-            if fn == "abort_shutdown" and self.scheduler is not None:
-                system_module.dispatch(fn, self.config, self.logger, self.scheduler)
-            else:
-                system_module.dispatch(fn, self.config, self.logger)
+            # 取消关机 needs the scheduler to cancel pending tasks; on macOS
+            # shutdown/restart also get the 15s grace period through it
+            # (Windows' `shutdown /t 15` equivalent — abortable via 取消关机).
+            extra = ()
+            if self.scheduler is not None and (
+                fn == "abort_shutdown"
+                or (grace and fn in ("shutdown", "restart") and sys.platform == "darwin")
+            ):
+                extra = (self.scheduler,)
+            system_module.dispatch(fn, self.config, self.logger, *extra)
         elif spec.kind == "app":
             apps_module.open_app(spec.payload, self.logger)
         elif spec.kind == "custom":

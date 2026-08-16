@@ -36,11 +36,25 @@ def _post_media_key(nx_keytype: int) -> None:
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
 
 
-def shutdown(config, logger):
+# Windows gives shutdown/restart a 15s abortable grace period (shutdown /t 15,
+# cancelled by 取消关机). macOS has no native equivalent, so when a scheduler
+# is available the command is scheduled there — same UX, same abortability.
+_SHUTDOWN_GRACE_SECONDS = 15
+
+
+def shutdown(config, logger, scheduler=None):
+    if scheduler is not None:
+        scheduler.add_delay("关机", _SHUTDOWN_GRACE_SECONDS)
+        logger.info("Shutdown scheduled via grace timer")
+        return
     _osascript('tell app "System Events" to shut down', logger)
 
 
-def restart(config, logger):
+def restart(config, logger, scheduler=None):
+    if scheduler is not None:
+        scheduler.add_delay("重启", _SHUTDOWN_GRACE_SECONDS)
+        logger.info("Restart scheduled via grace timer")
+        return
     _osascript('tell app "System Events" to restart', logger)
 
 

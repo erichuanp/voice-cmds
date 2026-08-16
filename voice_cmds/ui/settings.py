@@ -230,7 +230,11 @@ class SettingsDialog(QDialog):
             row_widget = QWidget()
             row_widget.setLayout(row)
             f.addRow(label, row_widget)
-        f.addRow("", hint("点击输入框后按下按键即可录制；开始录音需要两个键，结束/取消一个键。鼠标支持右键，不支持左键。Esc 取消录制。"))
+        f.addRow("", hint(
+            "点击输入框后按下按键即可录制；开始录音需要两个键，结束/取消一个键。"
+            "鼠标支持右键，不支持左键。Esc 取消录制。"
+            + ("（macOS 上 Command 键显示为 windows。）" if sys.platform == "darwin" else "")
+        ))
         v.addWidget(hotkey_box)
 
         # 识别

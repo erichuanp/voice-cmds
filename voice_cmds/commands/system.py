@@ -58,4 +58,9 @@ def dispatch(fn_name: str, config, logger: logging.Logger, *extra) -> None:
     fn = getattr(_impl, fn_name, None)
     if not callable(fn):
         raise RuntimeError(f"Unknown system function: {fn_name}")
-    fn(config, logger)
+    # macOS shutdown/restart get the abortable 15s grace period through the
+    # scheduler (the Windows impls have shutdown /t 15 natively).
+    if extra and sys.platform == "darwin" and fn_name in ("shutdown", "restart"):
+        fn(config, logger, scheduler=extra[0])
+    else:
+        fn(config, logger)
