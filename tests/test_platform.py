@@ -79,6 +79,46 @@ def test_mac_modules_importable():
     assert hotkey_mac._KEYCODE_TO_NAME[58] == "alt"
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_mac_shutdown_grace_scheduling():
+    """shutdown/restart schedule a 15s abortable grace task when given a scheduler."""
+    import logging
+
+    from voice_cmds.commands import _sys_mac
+
+    class _Scheduler:
+        def __init__(self):
+            self.calls = []
+
+        def add_delay(self, command, seconds):
+            self.calls.append((command, seconds))
+
+    log = logging.getLogger("test")
+    s = _Scheduler()
+    _sys_mac.shutdown(None, log, scheduler=s)
+    assert s.calls == [("关机", 15)]
+    _sys_mac.restart(None, log, scheduler=s)
+    assert s.calls == [("关机", 15), ("重启", 15)]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_mac_dispatch_forwards_scheduler():
+    import logging
+
+    from voice_cmds.commands import system as sm
+
+    class _Scheduler:
+        def __init__(self):
+            self.calls = []
+
+        def add_delay(self, command, seconds):
+            self.calls.append((command, seconds))
+
+    s = _Scheduler()
+    sm.dispatch("shutdown", None, logging.getLogger("test"), s)
+    assert s.calls == [("关机", 15)]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 def test_windows_single_instance():
     from voice_cmds import single_instance

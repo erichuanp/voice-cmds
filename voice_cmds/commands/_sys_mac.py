@@ -27,6 +27,45 @@ def _osascript(script: str, logger: logging.Logger) -> None:
     _run(["osascript", "-e", script], logger)
 
 
+# The AppleScript fragments, as module constants so tests/CI can syntax-check
+# them with `osacompile` (compiles without executing).
+_SHUTDOWN_SCRIPT = 'tell app "System Events" to shut down'
+_RESTART_SCRIPT = 'tell app "System Events" to restart'
+_LOGOFF_SCRIPT = 'tell app "System Events" to log out'
+_LOCK_SCRIPT = (
+    'tell application "System Events" to keystroke "q" using {control down, command down}'
+)
+_VOLUME_UP_SCRIPT = (
+    'set volume output volume ((output volume of (get volume settings)) + 5)'
+)
+_VOLUME_DOWN_SCRIPT = (
+    'set volume output volume ((output volume of (get volume settings)) - 5)'
+)
+_VOLUME_MUTE_SCRIPT = (
+    'set volume output muted not (output muted of (get volume settings))'
+)
+_CLOSE_WINDOW_SCRIPT = (
+    'tell application "System Events" to keystroke "w" using command down'
+)
+_MINIMIZE_ALL_SCRIPT = (
+    'tell application "System Events" to keystroke "m" using {option down, command down}'
+)
+_EMPTY_TRASH_SCRIPT = 'tell application "Finder" to empty trash'
+
+ALL_SCRIPTS = (
+    _SHUTDOWN_SCRIPT,
+    _RESTART_SCRIPT,
+    _LOGOFF_SCRIPT,
+    _LOCK_SCRIPT,
+    _VOLUME_UP_SCRIPT,
+    _VOLUME_DOWN_SCRIPT,
+    _VOLUME_MUTE_SCRIPT,
+    _CLOSE_WINDOW_SCRIPT,
+    _MINIMIZE_ALL_SCRIPT,
+    _EMPTY_TRASH_SCRIPT,
+)
+
+
 def _post_media_key(nx_keytype: int) -> None:
     import Quartz
 
@@ -47,7 +86,7 @@ def shutdown(config, logger, scheduler=None):
         scheduler.add_delay("关机", _SHUTDOWN_GRACE_SECONDS)
         logger.info("Shutdown scheduled via grace timer")
         return
-    _osascript('tell app "System Events" to shut down', logger)
+    _osascript(_SHUTDOWN_SCRIPT, logger)
 
 
 def restart(config, logger, scheduler=None):
@@ -55,7 +94,7 @@ def restart(config, logger, scheduler=None):
         scheduler.add_delay("重启", _SHUTDOWN_GRACE_SECONDS)
         logger.info("Restart scheduled via grace timer")
         return
-    _osascript('tell app "System Events" to restart', logger)
+    _osascript(_RESTART_SCRIPT, logger)
 
 
 def sleep(config, logger):
@@ -63,7 +102,7 @@ def sleep(config, logger):
 
 
 def logoff(config, logger):
-    _osascript('tell app "System Events" to log out', logger)
+    _osascript(_LOGOFF_SCRIPT, logger)
 
 
 def abort_shutdown(config, logger):
@@ -74,31 +113,19 @@ def abort_shutdown(config, logger):
 
 def lock(config, logger):
     # Cmd+Ctrl+Q is the system "Lock Screen" shortcut (macOS 10.13+).
-    _osascript(
-        'tell application "System Events" to keystroke "q" using {control down, command down}',
-        logger,
-    )
+    _osascript(_LOCK_SCRIPT, logger)
 
 
 def volume_up(config, logger):
-    _osascript(
-        'set volume output volume ((output volume of (get volume settings)) + 5)',
-        logger,
-    )
+    _osascript(_VOLUME_UP_SCRIPT, logger)
 
 
 def volume_down(config, logger):
-    _osascript(
-        'set volume output volume ((output volume of (get volume settings)) - 5)',
-        logger,
-    )
+    _osascript(_VOLUME_DOWN_SCRIPT, logger)
 
 
 def volume_mute(config, logger):
-    _osascript(
-        'set volume output muted not (output muted of (get volume settings))',
-        logger,
-    )
+    _osascript(_VOLUME_MUTE_SCRIPT, logger)
 
 
 def media_play_pause(config, logger):
@@ -114,20 +141,14 @@ def media_prev(config, logger):
 
 
 def close_window(config, logger):
-    _osascript(
-        'tell application "System Events" to keystroke "w" using command down',
-        logger,
-    )
+    _osascript(_CLOSE_WINDOW_SCRIPT, logger)
 
 
 def minimize_all(config, logger):
     # Cmd+Opt+M minimizes all windows of the frontmost app — the closest
     # macOS counterpart to Windows "minimize all".
-    _osascript(
-        'tell application "System Events" to keystroke "m" using {option down, command down}',
-        logger,
-    )
+    _osascript(_MINIMIZE_ALL_SCRIPT, logger)
 
 
 def empty_recycle_bin(config, logger):
-    _osascript('tell application "Finder" to empty trash', logger)
+    _osascript(_EMPTY_TRASH_SCRIPT, logger)

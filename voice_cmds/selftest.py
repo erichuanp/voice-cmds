@@ -257,6 +257,48 @@ def run() -> int:
 
         _check("macOS module imports + keycode table", _mac_modules)
 
+        def _applescript_syntax():
+            """osacompile every shipped AppleScript fragment (compiles,
+            never executes) — catches typos that would only explode on a
+            real user's machine."""
+            import shutil as _shutil
+
+            if _shutil.which("osacompile") is None:
+                return
+            from voice_cmds.commands import _sys_mac
+
+            with tempfile.TemporaryDirectory() as td:
+                for i, script in enumerate(_sys_mac.ALL_SCRIPTS):
+                    out = Path(td) / f"probe{i}.scpt"
+                    r = subprocess.run(
+                        ["osacompile", "-o", str(out), "-e", script],
+                        capture_output=True, text=True,
+                    )
+                    assert r.returncode == 0, f"AppleScript syntax error: {script!r}\n{r.stderr}"
+
+        _check("AppleScript fragments compile (osacompile)", _applescript_syntax)
+
+        def _event_tap_probe():
+            """Exercise the pyobjc CGEventTap API surface + callback
+            marshalling (a real tap needs Accessibility, which CI lacks —
+            the call must simply not crash)."""
+            import Quartz
+
+            assert Quartz.kCGSessionEventTap is not None
+            mask = (1 << Quartz.kCGEventKeyDown) | (1 << Quartz.kCGEventRightMouseDown)
+            tap = Quartz.CGEventTapCreate(
+                Quartz.kCGSessionEventTap,
+                Quartz.kCGHeadInsertEventTap,
+                Quartz.kCGEventTapOptionListenOnly,
+                mask,
+                lambda *a: a[2] if len(a) > 2 else None,
+                None,
+            )
+            if tap:
+                Quartz.CGEventTapEnable(tap, False)
+
+        _check("CGEventTap API probe", _event_tap_probe)
+
     else:
         def _win_modules():
             from voice_cmds import single_instance
