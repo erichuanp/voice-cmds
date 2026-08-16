@@ -54,7 +54,8 @@ def build(args: argparse.Namespace) -> Path:
     print(f"[1/2] manifest.json: {len(files)} files")
 
     # 2. portable zip (paths include the top-level dir, like the ps1 script).
-    zip_path = out / f"voice-cmds-v{version}{args.suffix}-portable.zip"
+    suffix = f"-{args.suffix}" if args.suffix else ""
+    zip_path = out / f"voice-cmds-v{version}{suffix}-portable.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
@@ -70,7 +71,7 @@ def main() -> None:
     ap.add_argument("--version", default="")
     ap.add_argument("--dist", default="dist/voice-cmds")
     ap.add_argument("--out", default="release")
-    ap.add_argument("--suffix", default="", help="e.g. '-macos-14'")
+    ap.add_argument("--suffix", default="", help="e.g. 'macos-arm64' (dash added automatically)")
     build(ap.parse_args())
 
 

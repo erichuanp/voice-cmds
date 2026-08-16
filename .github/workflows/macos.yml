@@ -41,7 +41,7 @@ jobs:
         run: ./dist/voice-cmds/voice-cmds --selftest
 
       - name: Package release (manifest + zip)
-        run: python build_release.py --suffix "-macos-${{ matrix.arch }}"
+        run: python build_release.py --suffix=macos-${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v4
         with:

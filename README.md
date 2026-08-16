@@ -2,6 +2,8 @@
 
 Windows 11 voice command tool — press a hotkey, speak a short command, watch a green capsule fill with your words and execute. Streaming Chinese-first STT (sherpa-onnx zipformer-bilingual) feeds a tray-resident app; matched commands fire native Windows actions, configured apps, or user scripts. Stop by key press **or automatically after 0.5 s of silence** (VAD); misheard homophones still match thanks to a pinyin-with-tones embedding layer, and the embedder runs on **direct ONNX** (no torch, ~700 MB smaller bundle).
 
+**macOS is supported on the `macos` branch** — see [macOS 支持](#macos-支持) below; CI builds and headless-tests both Intel and Apple Silicon on every push.
+
 📘 **[DESIGN.md](DESIGN.md)** is the source of truth for architecture, configuration, and behavior. Always update it alongside code changes.
 
 ---
@@ -29,9 +31,11 @@ Edit `config/settings.json` or use **Tray → 设置 → 通用**.
 
 | Action | Default |
 |---|---|
-| Start recording | `Left Ctrl + Right Alt` |
-| Stop (only while recording) | `Right Alt` |
+| Start recording | `Ctrl + Alt` |
+| Stop (only while recording) | `Alt` |
 | Cancel (only while recording) | `Esc` |
+
+Modifiers are side-agnostic (`ctrl` = either Ctrl key; on macOS `windows` = Command ⌘).
 
 ## Stop modes
 
@@ -84,6 +88,30 @@ pyinstaller voice-cmds.spec --clean --noconfirm
 iscc installer.iss
 # release/voice-cmds-Setup-v0.0.1.exe
 ```
+
+## macOS 支持
+
+`macos` 分支维护完整的 macOS 移植（Intel + Apple Silicon 双架构，GitHub
+Actions 上真机构建 + 无头测试）：
+
+- **同一套识别核心**：sherpa-onnx STT、ONNX 语义嵌入、拼音+声调三层匹配、定时任务、混合语音+打字编辑全部一致；热键语义一致（`ctrl`/`alt`/`shift`/`windows`=Command，左右等价，支持右键）
+- **平台实现**：全局热键用 Quartz CGEventTap（需「辅助功能」权限，首次启动引导）；系统命令走 `osascript`/`pmset`/CoreGraphics 媒体键；开机自启写 `~/Library/LaunchAgents` 的 launchd plist；单实例用 `flock`；数据目录在 `~/Library/Application Support/voice-cmds/`
+- **更新器**：同一套差分热更新（manifest + zip），按架构选择 `-macos-arm64-` / `-macos-x86_64-` 资产；`update.sh` 替代 `update.bat`（macOS 无文件锁，替换更简单）
+- **发布**：`build_release.py`（跨平台 manifest+zip 打包）；v1 为便携 zip（解压到可写目录如 `~/Applications` 后运行 `voice-cmds`），首次下载模型约 375MB
+
+构建（macOS）：
+
+```sh
+pip install -r mac-requirements.txt
+pytest tests -q
+python main.py --selftest
+pyinstaller voice-cmds.spec --noconfirm
+python build_release.py --suffix -macos-arm64   # 或 -macos-x86_64
+```
+
+限制（v1）：未做代码签名/公证（首次运行需右键→打开绕过 Gatekeeper，与
+Windows 的 SmartScreen 提示类似）；Dock 图标不隐藏；交互层（麦克风权限
+弹窗、辅助功能授权流程、热键手感）需真机最终确认。
 
 ## Project layout
 
