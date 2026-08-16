@@ -8,6 +8,14 @@ from voice_cmds.matcher import (
 )
 
 
+def test_ort_ffi_loads_sherpa_runtime():
+    """sherpa-onnx's bundled onnxruntime must load via the C API."""
+    from voice_cmds.ort_ffi import _load_api
+
+    _dll, api = _load_api()
+    assert api is not None
+
+
 def test_normalize_combo():
     assert normalize_combo("left ctrl+right alt") == "ctrl+alt"
     assert normalize_combo("right alt") == "alt"

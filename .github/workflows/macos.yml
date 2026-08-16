@@ -10,7 +10,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14]   # Intel + Apple Silicon
+        include:
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -36,15 +40,12 @@ jobs:
       - name: Selftest (frozen)
         run: ./dist/voice-cmds/voice-cmds --selftest
 
-      - name: Package portable zip
-        run: |
-          mkdir -p release
-          cd dist
-          zip -qry ../release/voice-cmds-macos-${{ matrix.os }}-portable.zip voice-cmds
-          cd ..
+      - name: Package release (manifest + zip)
+        run: python build_release.py --suffix "-macos-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: voice-cmds-${{ matrix.os }}
           path: |
-            release/voice-cmds-macos-${{ matrix.os }}-portable.zip
+            release/*.zip
+            release/manifest.json

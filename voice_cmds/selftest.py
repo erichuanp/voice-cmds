@@ -126,6 +126,16 @@ def run() -> int:
 
     _check("config load/seed", _config)
 
+    def _ort_ffi():
+        # Loads sherpa's bundled onnxruntime through the C API — exercises
+        # the dylib/DLL name + OrtApi resolution on this platform.
+        from voice_cmds.ort_ffi import _load_api
+
+        _dll, api = _load_api()
+        assert api is not None
+
+    _check("ORT FFI load", _ort_ffi)
+
     # --- Qt widgets (offscreen) --------------------------------------------
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QMessageBox

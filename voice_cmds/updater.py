@@ -45,11 +45,28 @@ def fetch_latest_release() -> dict:
     r.raise_for_status()
     data = r.json()
     manifest_url = zip_url = None
-    for a in data.get("assets", []):
-        if a.get("name") == "manifest.json":
-            manifest_url = a["browser_download_url"]
-        elif a.get("name", "").endswith("-portable.zip"):
-            zip_url = a["browser_download_url"]
+    # On macOS pick the zip built for this machine's architecture
+    # (voice-cmds-vX-macos-arm64-portable.zip / -macos-x86_64-...); on other
+    # platforms the plain voice-cmds-vX-portable.zip.
+    if sys.platform == "darwin":
+        import platform as _platform
+
+        want = "arm64" if _platform.machine() == "arm64" else "x86_64"
+        marker = f"-macos-{want}-"
+        for a in data.get("assets", []):
+            if a.get("name") == "manifest.json":
+                manifest_url = a["browser_download_url"]
+            elif a.get("name", "").endswith("-portable.zip") and marker in a["name"]:
+                zip_url = a["browser_download_url"]
+    else:
+        for a in data.get("assets", []):
+            if a.get("name") == "manifest.json":
+                manifest_url = a["browser_download_url"]
+            elif (
+                a.get("name", "").endswith("-portable.zip")
+                and "-macos-" not in a["name"]
+            ):
+                zip_url = a["browser_download_url"]
     return {"tag": str(data["tag_name"]), "manifest_url": manifest_url, "zip_url": zip_url}
 
 

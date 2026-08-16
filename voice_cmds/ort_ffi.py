@@ -16,11 +16,22 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import sys
 from pathlib import Path
 
 logger = logging.getLogger("voice_cmds.ort_ffi")
 
 ORT_API_VERSION = 24
+
+# Library name and path-char width differ per platform:
+#   Windows: sherpa_onnx/lib/onnxruntime.dll, ORTCHAR_T = wchar_t
+#   macOS:   sherpa_onnx/lib/libonnxruntime.dylib, ORTCHAR_T = char
+if sys.platform == "darwin":
+    _ORT_DLL_NAME = "libonnxruntime.dylib"
+    _MODEL_PATH_TYPE = ctypes.c_char_p
+else:
+    _ORT_DLL_NAME = "onnxruntime.dll"
+    _MODEL_PATH_TYPE = ctypes.c_wchar_p
 
 # OrtApi struct field indices (0-based), onnxruntime_c_api.h v1.24.4
 _IDX = {
@@ -83,13 +94,13 @@ def _check(status_ptr, api) -> None:
 
 
 def _load_api() -> tuple[ctypes.CDLL, _OrtApi]:
-    """Locate sherpa-onnx's onnxruntime.dll and resolve the OrtApi table."""
+    """Locate sherpa-onnx's bundled onnxruntime and resolve the OrtApi table."""
     import sherpa_onnx
 
-    dll_path = Path(sherpa_onnx.__file__).parent / "lib" / "onnxruntime.dll"
+    dll_path = Path(sherpa_onnx.__file__).parent / "lib" / _ORT_DLL_NAME
     if not dll_path.exists():
         raise RuntimeError(
-            f"未找到 sherpa_onnx 自带的 onnxruntime.dll: {dll_path}"
+            f"未找到 sherpa_onnx 自带的 onnxruntime 运行库: {dll_path}"
         )
     dll = ctypes.CDLL(str(dll_path))
     dll.OrtGetApiBase.restype = ctypes.c_void_p
@@ -143,7 +154,7 @@ class ORTSession:
         )
         self._create_session = fn(
             "CreateSession", ctypes.c_void_p,
-            ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_void_p,
+            ctypes.c_void_p, _MODEL_PATH_TYPE, ctypes.c_void_p,
             ctypes.POINTER(ctypes.c_void_p),
         )
         self._create_mem_info = fn(
