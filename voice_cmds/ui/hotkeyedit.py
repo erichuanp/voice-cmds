@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLineEdit
 
@@ -120,12 +122,17 @@ class HotkeyLineEdit(QLineEdit):
         if not self._capturing:
             super().keyPressEvent(event)
             return
+        if sys.platform == "darwin":
+            # Qt on macOS has no Windows-style scan codes — key() + modifiers
+            # carry everything we need.
+            self._process_key_mac(event)
+            return
         scan = int(event.nativeScanCode()) & 0x1FF
         self._process_key(scan, event.key(), event.modifiers())
 
     def _process_key(self, scan: int, key: int, modifiers) -> None:
-        """Capture step, separated for testability (synthetic events lack
-        native scan codes)."""
+        """Windows capture step, separated for testability (synthetic events
+        lack native scan codes)."""
         if not self._capturing:
             return
         if key == Qt.Key_Escape:
@@ -138,6 +145,27 @@ class HotkeyLineEdit(QLineEdit):
         name = self._key_name(scan, key, modifiers)
         if name is None:
             return
+        self._add_name(name)
+
+    def _process_key_mac(self, event) -> None:
+        """macOS capture step — same semantics, Qt-key based (no scan codes)."""
+        if not self._capturing:
+            return
+        key = event.key()
+        if key == Qt.Key_Escape:
+            self._cancel_capture()
+            return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            if self._parts:
+                self._accept()
+            return
+        name = self._key_name_mac(key, event.modifiers())
+        if name is None:
+            return
+        self._add_name(name)
+
+    def _add_name(self, name: str) -> None:
+        """Shared accept flow for both platforms."""
         if self._two_keys:
             if name not in self._parts:
                 self._parts.append(name)
@@ -169,8 +197,27 @@ class HotkeyLineEdit(QLineEdit):
     def _key_name(scan: int, key: int, modifiers) -> str | None:
         """Map (scan code, Qt key, modifiers) to the hotkey name."""
         if scan in _MODIFIER_BY_SCAN:
-            # A modifier key itself — left/right distinguishable by scan code.
+            # A modifier key itself — mapped to its plain name.
             return _MODIFIER_BY_SCAN[scan]
+        return HotkeyLineEdit._key_name_qt(key, modifiers)
+
+    @staticmethod
+    def _key_name_mac(key: int, modifiers) -> str | None:
+        """Map (Qt key, modifiers) to the hotkey name (macOS capture path)."""
+        # A modifier key itself.
+        if key == Qt.Key_Control:
+            return "ctrl"
+        if key == Qt.Key_Alt:
+            return "alt"
+        if key == Qt.Key_Shift:
+            return "shift"
+        if key == Qt.Key_Meta:
+            return "windows"
+        return HotkeyLineEdit._key_name_qt(key, modifiers)
+
+    @staticmethod
+    def _key_name_qt(key: int, modifiers) -> str | None:
+        """Modifiers + main key from Qt values (shared by both platforms)."""
         mods = []
         if modifiers & Qt.ControlModifier:
             mods.append("ctrl")

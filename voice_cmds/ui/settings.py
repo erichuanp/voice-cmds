@@ -7,6 +7,7 @@ Chinese 保存/取消 buttons (no mixed-language QDialogButtonBox).
 from __future__ import annotations
 
 import json
+import sys
 import threading
 
 from PySide6.QtCore import Signal, Slot
@@ -101,9 +102,12 @@ class _CommandDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _browse(self) -> None:
+        if sys.platform == "darwin":
+            filter_str = "应用与脚本 (*.app *.sh *.command *.py);;All files (*)"
+        else:
+            filter_str = "程序与脚本 (*.bat *.cmd *.ps1 *.py *.exe *.lnk);;All files (*.*)"
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择程序或脚本", "",
-            "程序与脚本 (*.bat *.cmd *.ps1 *.py *.exe *.lnk);;All files (*.*)",
+            self, "选择程序或脚本", "", filter_str,
         )
         if path:
             self.path.setText(path)
@@ -330,8 +334,12 @@ class SettingsDialog(QDialog):
         btns.addWidget(export)
         layout.addWidget(hint(
             "「打开<触发词>」用于启动程序（触发词可用 ; 或 ；分隔多个别名）；"
-            "「触发词」用于脚本或程序（.bat/.cmd/.ps1/.py/.exe/.lnk）。"
-            "可用 导入/导出 通过 .jsonl 备份或迁移命令。"
+            + (
+                "「触发词」用于脚本或程序（.app/.sh/.command/.py）。"
+                if sys.platform == "darwin"
+                else "「触发词」用于脚本或程序（.bat/.cmd/.ps1/.py/.exe/.lnk）。"
+            )
+            + "可用 导入/导出 通过 .jsonl 备份或迁移命令。"
         ))
         layout.addWidget(self.cmd_list, 1)
         layout.addLayout(btns)

@@ -9,9 +9,10 @@ Flow:
    central directory + the compressed byte range of each changed entry);
    any failure falls back to downloading the whole zip.
 4. Changed files are staged into `<app>/_update/` with a plan file
-   `_update.json`; `launch_update_bat()` writes and spawns update.bat, and
-   the app exits. The bat waits ~2s (locks released), copies the staged
-   files over the app, deletes removed files, then restarts the exe.
+   `_update.json`; `launch_update_bat()` writes and spawns the platform
+   apply script (update.bat on Windows, update.sh on macOS), and the app
+   exits. The script copies the staged files over the app, deletes removed
+   files, then restarts the app.
 
 User data (models/ logs/ config/ scripts/) is never touched.
 """
@@ -24,6 +25,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import zlib
 from pathlib import Path
 from typing import Callable, Optional
@@ -264,14 +266,58 @@ def prepare_update(
     return len(changed), len(deleted)
 
 
-def launch_update_bat(root: Path) -> Path:
-    """Write and spawn update.bat (apply staged files, restart the app).
+def build_update_sh_lines(root: Path, plan: dict) -> list[str]:
+    """The macOS apply script (update.sh). Exposed for tests.
 
-    The app must exit right after calling this. The bat waits for the old
-    process to release file locks and RETRIES copying the exe until it
-    succeeds (restarting too early left the old exe in place in 0.8.0/0.8.1),
-    then copies everything else, removes deleted files and starts the new exe.
+    macOS has no mandatory file locks, so replacing a running executable
+    works without the Windows retry dance; everything else mirrors the
+    Windows bat: copy staged files over the app dir, remove deleted files,
+    clean up, relaunch.
     """
+    lines = [
+        "#!/bin/sh",
+        'cd "$(dirname "$0")"',
+        "sleep 1",
+        'cp -R _update/. .',
+        "rm -rf _update",
+    ]
+    for p in plan.get("deleted", []):
+        lines.append(f'rm -f "./{p}"')
+    lines += [
+        'rm -f "./_update.json"',
+        'rm -f "./update.sh"',
+        'nohup ./voice-cmds >/dev/null 2>&1 &',
+    ]
+    return lines
+
+
+def launch_update_sh(root: Path) -> Path:
+    """Write and spawn update.sh (macOS); return the script path."""
+    plan = json.loads((root / "_update.json").read_text(encoding="utf-8"))
+    sh_path = root / "update.sh"
+    sh_path.write_text("\n".join(build_update_sh_lines(root, plan)) + "\n",
+                       encoding="utf-8")
+    subprocess.Popen(
+        ["/bin/sh", str(sh_path)],
+        start_new_session=True,
+        close_fds=True,
+        cwd=str(root),
+    )
+    logger.info("Update sh spawned: %s", sh_path)
+    return sh_path
+
+
+def launch_update_bat(root: Path) -> Path:
+    """Write and spawn the platform apply script (update.bat / update.sh),
+    then the app exits and the script stages files + restarts.
+
+    The Windows bat waits for the old process to release file locks and
+    RETRIES copying the exe until it succeeds (restarting too early left
+    the old exe in place in 0.8.0/0.8.1), then copies everything else,
+    removes deleted files and starts the new exe.
+    """
+    if sys.platform == "darwin":
+        return launch_update_sh(root)
     plan = json.loads((root / "_update.json").read_text(encoding="utf-8"))
     lines = [
         "@echo off",

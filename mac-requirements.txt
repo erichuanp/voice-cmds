@@ -1,0 +1,12 @@
+# macOS build/test dependencies (CI + dev)
+PySide6>=6.6
+sounddevice
+numpy
+sherpa-onnx
+tokenizers
+pypinyin
+requests
+tqdm
+pyobjc-framework-Quartz
+pytest
+pyinstaller

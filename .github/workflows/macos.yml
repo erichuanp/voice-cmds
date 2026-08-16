@@ -1,0 +1,50 @@
+name: macOS build & test
+
+on:
+  push:
+    branches: [macos]
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14]   # Intel + Apple Silicon
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r mac-requirements.txt
+
+      - name: Unit tests (offscreen)
+        run: python -m pytest tests -q
+
+      - name: Selftest (source)
+        run: python main.py --selftest
+
+      - name: Build with PyInstaller
+        run: pyinstaller voice-cmds.spec --noconfirm
+
+      - name: Selftest (frozen)
+        run: ./dist/voice-cmds/voice-cmds --selftest
+
+      - name: Package portable zip
+        run: |
+          mkdir -p release
+          cd dist
+          zip -qry ../release/voice-cmds-macos-${{ matrix.os }}-portable.zip voice-cmds
+          cd ..
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-cmds-${{ matrix.os }}
+          path: |
+            release/voice-cmds-macos-${{ matrix.os }}-portable.zip

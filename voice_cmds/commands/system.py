@@ -1,12 +1,22 @@
-"""Built-in system commands. Each function takes (config, logger) and executes."""
+"""Built-in system commands — platform-neutral facade.
+
+The trigger list is identical on every platform; each implementation lives
+in a per-platform module (_sys_win / _sys_mac) with the same function
+names. 取消关机 additionally cancels pending scheduled shutdown/restart
+tasks via the scheduler (platform-neutral).
+"""
 from __future__ import annotations
 
-import ctypes
 import logging
-import subprocess
+import sys
+
+if sys.platform == "darwin":
+    from . import _sys_mac as _impl
+else:
+    from . import _sys_win as _impl
 
 
-# (trigger, function name in this module)
+# (trigger, function name in the platform module)
 SYSTEM_COMMANDS: list[tuple[str, str]] = [
     ("关机", "shutdown"),
     ("重启", "restart"),
@@ -28,45 +38,8 @@ SYSTEM_COMMANDS: list[tuple[str, str]] = [
 ]
 
 
-def _run(cmd: list[str], logger: logging.Logger) -> None:
-    logger.info("Run: %s", " ".join(cmd))
-    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW)
-
-
-def _send_vk(vk: int) -> None:
-    KEYEVENTF_KEYUP = 0x0002
-    user32 = ctypes.windll.user32
-    user32.keybd_event(vk, 0, 0, 0)
-    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-
-
-# Fixed grace period before shutdown/restart/logoff — a small safety window
-# against accidental voice triggers (scheduled shutdowns go through the
-# timed-task system instead).
-_SHUTDOWN_GRACE_SECONDS = 15
-
-
-# --- implementations ---
-
-def shutdown(config, logger):
-    _run(["shutdown", "/s", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
-
-
-def restart(config, logger):
-    _run(["shutdown", "/r", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
-
-
-def sleep(config, logger):
-    # /h would hibernate; SetSuspendState invokes sleep. Use rundll32 directly.
-    _run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], logger)
-
-
-def logoff(config, logger):
-    _run(["shutdown", "/l", "/t", str(_SHUTDOWN_GRACE_SECONDS)], logger)
-
-
-def abort_shutdown(config, logger, scheduler=None):
-    _run(["shutdown", "/a"], logger)
+def _abort_shutdown(config, logger: logging.Logger, scheduler=None) -> None:
+    _impl.abort_shutdown(config, logger)
     # Also cancel pending scheduled 关机/重启 tasks (the scheduler matches
     # each task's command text against the same command set).
     if scheduler is not None:
@@ -78,61 +51,11 @@ def abort_shutdown(config, logger, scheduler=None):
             logger.warning("Failed to cancel scheduled shutdown tasks: %s", e)
 
 
-def lock(config, logger):
-    ctypes.windll.user32.LockWorkStation()
-    logger.info("LockWorkStation")
-
-
-def volume_up(config, logger):
-    _send_vk(0xAF)  # VK_VOLUME_UP
-
-
-def volume_down(config, logger):
-    _send_vk(0xAE)  # VK_VOLUME_DOWN
-
-
-def volume_mute(config, logger):
-    _send_vk(0xAD)  # VK_VOLUME_MUTE
-
-
-def media_play_pause(config, logger):
-    _send_vk(0xB3)  # VK_MEDIA_PLAY_PAUSE
-
-
-def media_next(config, logger):
-    _send_vk(0xB0)  # VK_MEDIA_NEXT_TRACK
-
-
-def media_prev(config, logger):
-    _send_vk(0xB1)  # VK_MEDIA_PREV_TRACK
-
-
-def close_window(config, logger):
-    user32 = ctypes.windll.user32
-    hwnd = user32.GetForegroundWindow()
-    WM_CLOSE = 0x0010
-    user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
-    logger.info("WM_CLOSE -> hwnd=%s", hwnd)
-
-
-def minimize_all(config, logger):
-    # Win+D toggles desktop; using shell COM object is more "minimize all":
-    import win32com.client
-    win32com.client.Dispatch("Shell.Application").MinimizeAll()
-    logger.info("Shell.MinimizeAll")
-
-
-def empty_recycle_bin(config, logger):
-    SHERB_NOCONFIRMATION = 0x00000001
-    SHERB_NOPROGRESSUI = 0x00000002
-    SHERB_NOSOUND = 0x00000004
-    flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
-    res = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, flags)
-    logger.info("SHEmptyRecycleBin -> %s", res)
-
-
-def dispatch(fn_name: str, config, logger, *extra) -> None:
-    fn = globals().get(fn_name)
+def dispatch(fn_name: str, config, logger: logging.Logger, *extra) -> None:
+    if fn_name == "abort_shutdown":
+        _abort_shutdown(config, logger, *extra)
+        return
+    fn = getattr(_impl, fn_name, None)
     if not callable(fn):
         raise RuntimeError(f"Unknown system function: {fn_name}")
-    fn(config, logger, *extra)
+    fn(config, logger)

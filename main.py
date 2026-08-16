@@ -146,10 +146,15 @@ def _install_sigint(app: QApplication) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="voice-cmds")
     parser.add_argument("--debug", action="store_true", help="enable file logging in ./logs/")
+    parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     logger = setup_logger(args.debug)
     logger.info("voice-cmds starting (debug=%s)", args.debug)
+
+    if args.selftest:
+        # Headless run — must be set before QApplication is created.
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -158,6 +163,11 @@ def main() -> int:
 
     app.setWindowIcon(build_app_icon())
     _install_sigint(app)
+
+    if args.selftest:
+        from voice_cmds.selftest import run as selftest_run
+
+        return selftest_run()
 
     # One instance per session: a second launch just tells the user where
     # to find the running one (tray) and exits.

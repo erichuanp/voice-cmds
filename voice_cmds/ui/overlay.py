@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import sys
 from enum import Enum, auto
 from typing import Callable, Optional
 
@@ -178,7 +179,13 @@ class OverlayWindow(QWidget):
         self._strip_win11_chrome()
 
     def _strip_win11_chrome(self) -> None:
-        """Disable Win11's DWM border + corner rounding on this window."""
+        """Disable Win11's DWM border + corner rounding on this window.
+
+        Windows-only — macOS has no DWM, and the guard keeps ctypes.windll
+        off the darwin import path.
+        """
+        if sys.platform != "win32":
+            return
         try:
             hwnd = int(self.winId())
             dwm = ctypes.windll.dwmapi

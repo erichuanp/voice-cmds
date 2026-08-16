@@ -413,19 +413,27 @@ class VoiceCmdsApp(QObject):
             cmd = [sys.executable, *sys.argv]
         self.logger.warning("Restarting: %s", cmd)
         try:
-            # Release the single-instance mutex first — the child starts
+            # Release the single-instance lock first — the child starts
             # before this process dies and would otherwise refuse to run.
             from . import single_instance
 
             single_instance.release()
-            DETACHED = 0x00000008  # DETACHED_PROCESS
-            CREATE_NEW_GROUP = 0x00000200
-            subprocess.Popen(
-                cmd,
-                cwd=os.getcwd(),
-                creationflags=DETACHED | CREATE_NEW_GROUP,
-                close_fds=True,
-            )
+            if sys.platform == "darwin":
+                subprocess.Popen(
+                    cmd,
+                    cwd=os.getcwd(),
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            else:
+                DETACHED = 0x00000008  # DETACHED_PROCESS
+                CREATE_NEW_GROUP = 0x00000200
+                subprocess.Popen(
+                    cmd,
+                    cwd=os.getcwd(),
+                    creationflags=DETACHED | CREATE_NEW_GROUP,
+                    close_fds=True,
+                )
         except Exception:
             self.logger.exception("Failed to spawn replacement process")
         self.shutdown()
