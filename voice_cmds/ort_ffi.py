@@ -195,6 +195,9 @@ class ORTSession:
         self._env = ctypes.c_void_p()
         self._session = ctypes.c_void_p()
         self._meminfo = ctypes.c_void_p()
+        # c_char_p wants bytes (c_wchar_p wants str) — normalize per platform.
+        if _MODEL_PATH_TYPE is ctypes.c_char_p:
+            model_path = str(model_path).encode("utf-8")
         try:
             _check(self._create_env(
                 _ORT_LOGGING_LEVEL_WARNING, b"voice-cmds",
@@ -205,7 +208,7 @@ class ORTSession:
                 self._set_graph_opt(opts, _ORT_ENABLE_ALL)
                 self._set_intra_threads(opts, intra_threads)
                 _check(self._create_session(
-                    self._env, str(model_path), opts,
+                    self._env, model_path, opts,
                     ctypes.byref(self._session)), api)
             finally:
                 if opts:
