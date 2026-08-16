@@ -343,7 +343,35 @@ dependencies:
 
 ---
 
-## 11. 待定 / 未来 TODO
+## 11. macOS 支持（`macos` 分支）
+
+平台抽象策略：识别核心（STT/嵌入/匹配/调度/UI）完全共享；平台胶水按
+`sys.platform` 选择实现模块。
+
+| 能力 | Windows 实现 | macOS 实现 |
+|---|---|---|
+| 全局热键 | `hotkey_win.py` WH_KEYBOARD_LL/WH_MOUSE_LL 钩子 | `hotkey_mac.py` Quartz CGEventTap（监听模式，需「辅助功能」权限） |
+| 热键匹配 | `hotkey.py` 平台无关匹配器（规范化键名集合） | 同左（Command → `windows`） |
+| 热键录制 | `HotkeyLineEdit` 扫描码路径 | 同控件 Qt 键值路径（`_process_key_mac`） |
+| 系统命令 | `commands/_sys_win.py`（shutdown/rundll32/LockWorkStation/media vk/Shell COM/SHEmptyRecycleBin） | `commands/_sys_mac.py`（osascript System Events、`pmset sleepnow`、Cmd+Ctrl+Q、`set volume`、NX_KEYTYPE 媒体键、Finder 清倒废纸篓） |
+| 打开应用 | `_apps_win.py`（.exe 直启；.bat/.cmd/.ps1/.lnk 走 cmd） | `_apps_mac.py`（.app 走 `open --args`；.sh/.command 走 /bin/sh；.py 走 python3） |
+| 自定义脚本 | cmd.exe shell | /bin/sh / python3 / open |
+| 开机自启 | 注册表 HKCU Run | `~/Library/LaunchAgents/com.erichuanp.voice-cmds.plist`（RunAtLoad） |
+| 单实例 | 命名互斥量 | `flock`（数据目录锁文件） |
+| 数据目录 | exe 旁（便携） | `~/Library/Application Support/voice-cmds/`（models/config/logs/scripts） |
+| 更新应用脚本 | update.bat（3s 等待+重试复制） | update.sh（无文件锁，直接 cp -R；按架构选资产 `-macos-arm64-`/`-macos-x86_64-`） |
+| 打包 | build_release.ps1（7-Zip + Inno Setup） | `build_release.py`（标准库 zip；v1 无安装器） |
+
+- 权限：麦克风（TCC）、辅助功能（热键 + 锁屏/关窗的 keystroke）、自动化
+  （osascript 控制 System Events/Finder）——首次使用系统弹窗引导；错误弹窗
+  关键词归类（errors.py）给出设置路径指引
+- 测试：`.github/workflows/macos.yml` 在 macos-13 (x86_64) / macos-14 (arm64)
+  真机构建 + `pytest` + `main.py --selftest`（无头；覆盖解析/匹配器/控件/
+  plist 经 plutil 校验/flock/update.sh/启动器/键码表/ORT dylib 加载）
+- 已知限制（v1）：未签名公证（首次运行需右键→打开）；无 Dock 图标隐藏；
+  交互层（权限弹窗、热键手感、真实麦克风）需真机验证
+
+## 12. 待定 / 未来 TODO
 
 - [x] ~~VAD 自动停止~~（0.1.0：静音 0.5s，设置可切换 hotkey/vad）
 - [x] ~~开机自启注册~~（设置 → 通用）
@@ -354,3 +382,6 @@ dependencies:
 - [ ] 多语言 UI（目前中文）
 - [x] ~~自动更新~~（0.8.0：差分热更新 §8.4）
 - [x] ~~卸载脚本~~（0.5.2：Inno Setup 卸载器，清理自启动与运行数据）
+- [ ] macOS：.app 打包 + LSUIElement 隐藏 Dock 图标 + 代码签名/公证
+- [ ] macOS：DMG 安装器
+- [ ] macOS：热键/音频/权限流程真机验收

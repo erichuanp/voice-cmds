@@ -5,9 +5,16 @@ category, a short next-step hint, and a collapsible copyable detail.
 """
 from __future__ import annotations
 
+from .config import MODELS_DIR
+
 # Order matters — first match wins.
 _LOAD_HARD_KEYWORDS = (
     "dll load failed", "importerror", "modulenotfound",
+)
+# macOS permission failures (osascript -1743/-25211, CGEventTap refusal, …)
+_PERMISSION_KEYWORDS = (
+    "assistive", "not authorized", "appleevent", "-1743", "-25211",
+    "cgpreflight", "辅助功能",
 )
 _DOWNLOAD_KEYWORDS = (
     "ssl", "sslcertverificationerror", "maxretry", "connection",
@@ -30,17 +37,22 @@ def categorize_error(text: str) -> tuple[str, str]:
     if any(k in low for k in _LOAD_HARD_KEYWORDS):
         return (
             "模型 / 程序加载失败",
-            "请重新打开程序重试；若持续失败，删除程序目录下的 models\\ 文件夹后重新启动，让程序重新下载模型。",
+            f"请重新打开程序重试；若持续失败，删除 {MODELS_DIR} 文件夹后重新启动，让程序重新下载模型。",
+        )
+    if any(k in low for k in _PERMISSION_KEYWORDS):
+        return (
+            "macOS 权限不足",
+            "请到 系统设置 → 隐私与安全性 → 辅助功能 / 自动化 中勾选 voice-cmds，然后重新启动本应用。",
         )
     if any(k in low for k in _DOWNLOAD_KEYWORDS):
         return (
             "网络 / 下载失败",
-            "请尝试更换网络环境后重试；也可以手动下载模型文件放入程序目录的 models\\ 文件夹（见 README）。",
+            f"请尝试更换网络环境后重试；也可以手动下载模型文件放入 {MODELS_DIR} 文件夹（见 README）。",
         )
     if any(k in low for k in _LOAD_KEYWORDS):
         return (
             "模型 / 程序加载失败",
-            "请重新打开程序重试；若持续失败，删除程序目录下的 models\\ 文件夹后重新启动，让程序重新下载模型。",
+            f"请重新打开程序重试；若持续失败，删除 {MODELS_DIR} 文件夹后重新启动，让程序重新下载模型。",
         )
     return (
         "未知错误",
