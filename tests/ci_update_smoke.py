@@ -100,10 +100,16 @@ def main() -> int:
         (new / "OLD.txt").unlink(missing_ok=True)
 
         import argparse
+        import platform as _platform
 
+        # The darwin updater only accepts zips carrying the arch marker.
+        if sys.platform == "darwin":
+            suffix = f"macos-{_platform.machine()}"
+        else:
+            suffix = "test"
         z = build(argparse.Namespace(
             dist=str(new), out=str(tmp / "release"),
-            version="9.9.9", suffix="-test",
+            version="9.9.9", suffix=suffix,
         ))
         release_dir = tmp / "release"
         release_json = {
