@@ -39,11 +39,17 @@ jobs:
       - name: Selftest (source)
         run: python main.py --selftest
 
+      - name: Deep model test (STT + embedder on real models)
+        run: python tests/ci_deep_models.py
+
       - name: Build with PyInstaller
         run: pyinstaller voice-cmds.spec --noconfirm
 
       - name: Selftest (frozen)
         run: ./dist/voice-cmds/voice-cmds --selftest
+
+      - name: Update flow smoke (end-to-end diff + apply)
+        run: python tests/ci_update_smoke.py
 
       - name: Package release (manifest + zip)
         run: python build_release.py --suffix=macos-${{ matrix.arch }}
