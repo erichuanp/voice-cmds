@@ -1,9 +1,10 @@
 """Hotkey capture widget: click the field, press key(s), done.
 
 - Clicking the field shows the capture hint and starts recording.
-- Two-key mode (开始录音): two presses, e.g. LeftCtrl then RightAlt →
-  "left ctrl+right alt".
+- Two-key mode (开始录音): two presses, e.g. Ctrl then Alt → "ctrl+alt".
 - Single-key mode (结束识别 / 取消): one press (modifier combos allowed).
+- Modifiers are plain "ctrl"/"alt"/"shift"/"windows" — left and right are
+  the same key (the global hook matches either side).
 - Mouse right button is supported ("right"); left button is excluded.
 - Esc cancels (restores the previous value); Enter accepts early.
 """
@@ -12,16 +13,19 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLineEdit
 
-# Windows native scan codes (extended keys have 0x100 added).
+from ..hotkey import normalize_combo
+
+# Windows native scan codes (extended keys have 0x100 added). Left and
+# right map to the same plain modifier name.
 _MODIFIER_BY_SCAN = {
-    0x1D: "left ctrl",
-    0x11D: "right ctrl",
-    0x38: "left alt",
-    0x138: "right alt",
-    0x2A: "left shift",
-    0x136: "right shift",
-    0x15B: "left windows",
-    0x15C: "right windows",
+    0x1D: "ctrl",
+    0x11D: "ctrl",
+    0x38: "alt",
+    0x138: "alt",
+    0x2A: "shift",
+    0x136: "shift",
+    0x15B: "windows",
+    0x15C: "windows",
 }
 
 _SPECIAL_KEYS = {
@@ -66,7 +70,8 @@ class HotkeyLineEdit(QLineEdit):
         parent=None,
     ) -> None:
         super().__init__(value, parent)
-        self._value = value
+        self._value = normalize_combo(value)
+        self.setText(self._value)
         self._two_keys = two_keys
         self._hint = hint
         self._capturing = False
@@ -162,7 +167,7 @@ class HotkeyLineEdit(QLineEdit):
 
     @staticmethod
     def _key_name(scan: int, key: int, modifiers) -> str | None:
-        """Map (scan code, Qt key, modifiers) to the keyboard-library name."""
+        """Map (scan code, Qt key, modifiers) to the hotkey name."""
         if scan in _MODIFIER_BY_SCAN:
             # A modifier key itself — left/right distinguishable by scan code.
             return _MODIFIER_BY_SCAN[scan]

@@ -21,9 +21,9 @@
 | 包管理 | **conda**（env: `voice-cmds`） | 用户指定 |
 | UI | PySide6 (Qt 6) | 原生圆角/阴影/动画/半透明 |
 | STT | sherpa-onnx `streaming-zipformer-bilingual-zh-en` | 中英双语流式，ONNX，5080 上 RTF < 0.05 |
-| Embedding | `Xenova/bge-small-zh-v1.5`（ONNX，onnxruntime + tokenizers） | 直接 ONNX 推理，CLS 池化 + L2 归一化与 torch 版逐条一致（cosine = 1.0）；省掉 torch ~700MB 打包体积。下载链：huggingface.co → modelscope.cn → hf-mirror.com |
+| Embedding | `Xenova/bge-small-zh-v1.5`（ONNX，tokenizers + ctypes 直调 sherpa 自带的 onnxruntime.dll） | 直接 ONNX 推理，CLS 池化 + L2 归一化与 torch 版逐条一致（cosine = 1.0）；省掉 torch ~700MB + 独立 onnxruntime 包 ~35MB 打包体积。下载链：huggingface.co → modelscope.cn → hf-mirror.com |
 | 音频 | `sounddevice` | 16kHz mono |
-| 热键 | `keyboard` | 全局；同进程内可区分左右 Ctrl/Alt 但默认按键已改 |
+| 热键 | 自研 Win32 低级键盘/鼠标钩子（`voice_cmds/hotkey.py`） | 全局；修饰键统一为 ctrl/alt/shift/windows（左右等价）；右键可作为热键；不再依赖 `keyboard` 库（其左右修饰键映射在多台机器上互相串扰、且存在误触发状态机问题） |
 | Win32 | `pywin32` | 系统命令（LockWorkStation 等）+ DwmSetWindowAttribute 通过 ctypes 调用 |
 | 托盘 | `QSystemTrayIcon`（PySide6 自带） | 不引入 pystray |
 
@@ -253,8 +253,8 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 ```json
 {
   "hotkey": {
-    "start": "left ctrl+right alt",
-    "stop": "right alt",
+    "start": "ctrl+alt",
+    "stop": "alt",
     "cancel": "esc"
   },
   "stop_mode": "hotkey",
@@ -276,7 +276,7 @@ y = work.bottom - window.height() - bottom_offset_px  # 默认 bottom_offset_px 
 
 ### 8.2 设置窗口（暴露的项）
 
-- **热键录制**（§4.1）：点击输入框后按键盘/鼠标键直接录制（开始录音两个键，结束/取消一个键；支持右键，不支持左键；Esc 取消录制）；每行带「重置」按钮恢复默认。保存前用 keyboard 库校验格式
+- **热键录制**（§4.1）：点击输入框后按键盘/鼠标键直接录制（开始录音两个键，结束/取消一个键；支持右键，不支持左键；Esc 取消录制）；每行带「重置」按钮恢复默认。保存前用 `parse_combo`（voice_cmds/hotkey.py）校验格式
 - **结束方式**（默认 hotkey）+ 静音时长（默认 500ms，范围 200–5000ms）
 - **结果展示时长**（仅 VAD 模式生效，默认 1000ms，范围 0–10000ms；**热键模式恒 0 = 识别后立即执行**，该输入框在热键模式下禁用）
 - **命令页（合并）**：统一管理「打开 X」与自定义命令（§7.2，添加弹窗内单选决定触发词规则），支持 jsonl 导入/导出
@@ -332,13 +332,10 @@ dependencies:
   - pip:
       - PySide6>=6.6
       - sounddevice
-      - soundfile
       - numpy
       - sherpa-onnx
-      - onnxruntime-gpu>=1.20  # CPU 用户可换 onnxruntime
       - tokenizers            # ONNX embedder 分词
       - pypinyin              # 拼音+声调匹配层
-      - keyboard
       - pywin32
       - requests
       - tqdm

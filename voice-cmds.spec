@@ -10,8 +10,9 @@ Output: dist/voice-cmds/voice-cmds.exe (+ _internal/ with deps)
 Models (STT ~280MB + embedder ONNX ~95MB) are NOT bundled — they download to
 ./models/ next to the exe on first run.
 
-The embedder runs through onnxruntime + tokenizers (no torch), which cuts
-~700 MB out of the frozen bundle vs the old sentence-transformers stack.
+The embedder runs through `tokenizers` + a minimal ctypes binding to the
+onnxruntime.dll sherpa-onnx already ships for STT (voice_cmds/ort_ffi.py) —
+no torch, no separate onnxruntime Python package.
 """
 from PyInstaller.utils.hooks import (
     collect_dynamic_libs,
@@ -26,19 +27,16 @@ hidden_imports += collect_submodules("tokenizers")
 hidden_imports += collect_submodules("pypinyin")
 hidden_imports += [
     "sounddevice",
-    "soundfile",
     "win32com",
     "win32com.client",
     "winreg",
-    "keyboard",
-    "PySide6.QtSvg",
-    "PySide6.QtNetwork",
 ]
 
-# Native runtime DLLs for sherpa-onnx + onnxruntime + tokenizers
+# Native runtime DLLs for sherpa-onnx + tokenizers. (The embedder drives
+# sherpa's bundled onnxruntime.dll through the C API — no separate
+# onnxruntime package.)
 binaries = []
 binaries += collect_dynamic_libs("sherpa_onnx")
-binaries += collect_dynamic_libs("onnxruntime")
 binaries += collect_dynamic_libs("tokenizers")
 
 # Data files for sherpa-onnx
@@ -87,10 +85,66 @@ a = Analysis(
         "hf_xet",
         "sklearn",
         "scipy",
+        "win32ui",      # Pythonwin — only the makepy/combrowse dev tools use it
+        "Pythonwin",
     ],
     noarchive=False,
     optimize=0,
 )
+
+# --- Slim the bundle -----------------------------------------------------
+# hook-PySide6 collects every Qt6 DLL / plugin / translation shipped in the
+# package, but the app only uses QtCore/QtGui/QtWidgets with the windows
+# platform plugin (no QML/Pdf/OpenGL/Network/Svg/VirtualKeyboard, no
+# QTranslator — Qt standard strings stay English as shipped). Also drop
+# Pythonwin's win32ui.pyd+mfc140u.dll (only the makepy/combrowse dev tools
+# need them) and dbghelp.dll (a stray system copy — nothing imports it).
+_DROP_BINARIES = {
+    "opengl32sw.dll",  # software-GL last resort; RHI/D3D11 always works on Win10/11
+    "Qt6Quick.dll",
+    "Qt6Qml.dll",
+    "Qt6QmlModels.dll",
+    "Qt6QmlMeta.dll",
+    "Qt6QmlWorkerScript.dll",
+    "Qt6Pdf.dll",
+    "Qt6OpenGL.dll",
+    "Qt6Network.dll",
+    "QtNetwork.pyd",
+    "Qt6Svg.dll",
+    "QtSvg.pyd",
+    "Qt6VirtualKeyboard.dll",
+    "dbghelp.dll",
+    "win32ui.pyd",
+    "mfc140u.dll",
+}
+a.binaries = [
+    b for b in a.binaries
+    if b[0].rsplit("\\", 1)[-1].rsplit("/", 1)[-1] not in _DROP_BINARIES
+]
+
+
+def _keep_binary(name: str) -> bool:
+    p = name.lower().replace("\\", "/")
+    if not p.startswith("pyside6/plugins/"):
+        return True
+    return p in {
+        "pyside6/plugins/platforms/qwindows.dll",
+        "pyside6/plugins/styles/qmodernwindowsstyle.dll",
+        "pyside6/plugins/imageformats/qico.dll",
+    }
+
+
+a.binaries = [b for b in a.binaries if _keep_binary(b[0])]
+
+
+def _keep_data(name: str) -> bool:
+    p = name.lower().replace("\\", "/")
+    # No QTranslator is installed, so all Qt translation .qm files are dead
+    # weight (~6 MB). All app strings are hardcoded Chinese already.
+    return not p.startswith("pyside6/translations/")
+
+
+a.datas = [d for d in a.datas if _keep_data(d[0])]
 
 # --- Force the env's OpenSSL (the build matching _ssl.pyd) ---------------
 # conda keeps the correct OpenSSL in <prefix>/Library/bin, but PyInstaller's

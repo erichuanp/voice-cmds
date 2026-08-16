@@ -70,7 +70,7 @@ Three layers, in order:
 2. **Pinyin + tones embedding** — text is converted to `拼音+声调` (`清空回收站 → qing1kong1hui2shou1zhan4`) before embedding, so STT homophone errors score ~0.95–1.0 against the right trigger (threshold default 0.88, `match.pinyin_similarity_threshold`)
 3. **Raw-text embedding** (BGE-small-zh-v1.5 ONNX) fallback, threshold default 0.85
 
-All triggers are pre-encoded at startup (pinyin + raw), so dispatch is two matmuls (~1ms). The embedder uses `Xenova/bge-small-zh-v1.5` ONNX via onnxruntime + tokenizers — CLS pooling reproduces the torch output exactly (cosine 1.0) without shipping torch.
+All triggers are pre-encoded at startup (pinyin + raw), so dispatch is two matmuls (~1ms). The embedder uses `Xenova/bge-small-zh-v1.5` ONNX via tokenizers + a minimal ctypes binding to the onnxruntime.dll sherpa-onnx already ships for STT (no separate onnxruntime package) — CLS pooling reproduces the torch output exactly (cosine 1.0) without shipping torch.
 
 ## Building from source
 
@@ -78,7 +78,7 @@ All triggers are pre-encoded at startup (pinyin + raw), so dispatch is two matmu
 conda activate voice-cmds
 pip install pyinstaller
 pyinstaller voice-cmds.spec --clean --noconfirm
-# dist/voice-cmds/voice-cmds.exe   (with _internal/ deps, ~400 MB — no torch)
+# dist/voice-cmds/voice-cmds.exe   (with _internal/ deps, ~230 MB — no torch, no onnxruntime)
 
 # Optional installer (requires Inno Setup 6):
 iscc installer.iss

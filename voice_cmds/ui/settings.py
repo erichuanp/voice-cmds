@@ -577,14 +577,15 @@ class SettingsDialog(QDialog):
             "stop": self.stop_key.text().strip(),
             "cancel": self.cancel_key.text().strip(),
         }
-        # Validate the captured combos against the keyboard library.
+        # Validate the captured combos against the hotkey parser.
         try:
-            import keyboard as kb_mod
+            from ..hotkey import parse_combo
+
             for label, combo in hotkeys.items():
-                if not combo:
+                if not combo.strip():
                     QMessageBox.warning(self, "热键无效", f"{label} 热键为空。")
                     return
-                kb_mod.parse_hotkey(combo)
+                parse_combo(combo)
         except Exception as e:
             QMessageBox.warning(self, "热键无效", f"热键格式无效：{e}")
             return

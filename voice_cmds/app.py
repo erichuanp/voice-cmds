@@ -8,7 +8,6 @@ import sys
 import threading
 from enum import Enum, auto
 
-import keyboard as kb
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -48,6 +47,11 @@ class VoiceCmdsApp(QObject):
         self.debug = debug
         self.state: AppState = AppState.IDLE
         self._partial_text = ""
+        # Voice text last written into the editable capsule (main thread
+        # only). _on_partial must compute its delta against THIS, not
+        # against self._partial_text — the audio thread advances the latter
+        # before the queued slot runs, which zeroed every voice delta.
+        self._shown_partial = ""
         # VAD (silence auto-stop) state, driven from the audio callback thread
         self._vad_silence_ms = 0.0
         self._vad_floor = 0.004  # adaptive ambient noise floor (RMS)
@@ -107,6 +111,7 @@ class VoiceCmdsApp(QObject):
         self.state = AppState.RECORDING
         self.hotkey.set_recording(True)
         self._partial_text = ""
+        self._shown_partial = ""
         self._vad_silence_ms = 0.0
         self._vad_floor = 0.004
         # Voice+typing editing is only available with hotkey stop; in VAD
@@ -178,19 +183,16 @@ class VoiceCmdsApp(QObject):
     @Slot(str)
     def _on_partial(self, text: str) -> None:
         if self._editable:
-            delta = self._partial_delta(self._partial_text, text)
+            # Voice partials are cumulative; append only the new tail to the
+            # editor (relative to what was already shown there).
+            if text.startswith(self._shown_partial):
+                delta = text[len(self._shown_partial):]
+            else:
+                delta = text
+            self._shown_partial = text
             self.overlay.append_partial(delta)
         else:
             self.overlay.update_text(text)
-
-    @staticmethod
-    def _partial_delta(old: str, new: str) -> str:
-        """Voice partials are cumulative — return the newly added tail."""
-        if not old:
-            return new
-        if new.startswith(old):
-            return new[len(old):]
-        return new
 
     # --- finalize + dispatch ---
     def _finalize_and_process(self) -> None:
@@ -222,9 +224,15 @@ class VoiceCmdsApp(QObject):
         if self._editable:
             # Append the recognizer's trailing tail (if any) to the edited
             # text at the cursor position, then use the full edited text.
-            delta = self._partial_delta(self._partial_text, text)
-            if delta:
-                self.overlay.append_partial(delta)
+            # Only append when the final transcript extends what the editor
+            # already shows — a diverged final would duplicate the text.
+            if text and text.startswith(self._shown_partial):
+                text = text[len(self._shown_partial):]
+            elif self._shown_partial:
+                text = ""
+            self._shown_partial = ""
+            if text:
+                self.overlay.append_partial(text)
             text = self.overlay.current_text()
             self.logger.warning("App: final editable text %r", text)
         try:
@@ -405,6 +413,11 @@ class VoiceCmdsApp(QObject):
             cmd = [sys.executable, *sys.argv]
         self.logger.warning("Restarting: %s", cmd)
         try:
+            # Release the single-instance mutex first — the child starts
+            # before this process dies and would otherwise refuse to run.
+            from . import single_instance
+
+            single_instance.release()
             DETACHED = 0x00000008  # DETACHED_PROCESS
             CREATE_NEW_GROUP = 0x00000200
             subprocess.Popen(
@@ -419,7 +432,7 @@ class VoiceCmdsApp(QObject):
 
     @Slot()
     def shutdown(self) -> None:
-        """Force-clean shutdown. Tray icons + keyboard hooks + Qt event loop."""
+        """Force-clean shutdown. Tray icons + Win32 hooks + Qt event loop."""
         self.logger.info("Shutting down")
         try:
             self.hotkey.stop()
@@ -430,14 +443,10 @@ class VoiceCmdsApp(QObject):
         except Exception:
             pass
         try:
-            kb.unhook_all()
-        except Exception:
-            pass
-        try:
             self.tray.tray.hide()
         except Exception:
             pass
         QApplication.quit()
-        # keyboard library spawns a Windows hook thread that can keep the
-        # process alive even after Qt's loop exits. Force the issue.
+        # The Win32 hook thread dies with the process; force the issue in
+        # case any lingering thread keeps the interpreter alive.
         os._exit(0)

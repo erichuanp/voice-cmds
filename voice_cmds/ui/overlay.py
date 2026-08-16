@@ -260,18 +260,28 @@ class OverlayWindow(QWidget):
             or not self._editable
             or self._state not in (State.RECORDING, State.PROCESSING)
         ):
+            logger.debug(
+                "append_partial skip: delta=%r editable=%s state=%s",
+                delta, self._editable, self._state,
+            )
             return
         pos = self._editor.cursorPosition()
         text = self._editor.text()
         self._editor.setText(text[:pos] + delta + text[pos:])
         self._editor.setCursorPosition(pos + len(delta))
         self._text = self._editor.text()
+        logger.debug(
+            "append_partial ok: delta=%r pos=%d now=%r",
+            delta, pos, self._editor.text(),
+        )
         self._animate_width(self._target_capsule_width(self._text))
 
     def current_text(self) -> str:
         """The full editable text (or the painted text in non-editable mode)."""
         if self._editable:
-            return self._editor.text().strip()
+            t = self._editor.text().strip()
+            logger.debug("current_text (editable): %r (editor shown=%s)", t, self._editor.isVisible())
+            return t
         return self._text
 
     def show_processing(self) -> None:

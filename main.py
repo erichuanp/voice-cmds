@@ -21,9 +21,7 @@ import threading
 import traceback
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
-from PySide6.QtWidgets import QApplication
-
-import keyboard as kb
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from voice_cmds.config import Config
 from voice_cmds.errors import categorize_error
@@ -123,21 +121,13 @@ class _Bootstrap(QObject):
     def _on_failed(self, tb: str) -> None:
         self._destroy_splash()
         _show_error_dialog("voice-cmds 启动失败", tb)
-        try:
-            kb.unhook_all()
-        except Exception:
-            pass
         QApplication.quit()
         os._exit(1)
 
 
 def _install_sigint(app: QApplication) -> None:
-    """Make Ctrl+C in the terminal actually quit Qt + the keyboard hook thread."""
+    """Make Ctrl+C in the terminal actually quit Qt."""
     def _handler(*_):
-        try:
-            kb.unhook_all()
-        except Exception:
-            pass
         app.quit()
         os._exit(0)
 
@@ -168,6 +158,18 @@ def main() -> int:
 
     app.setWindowIcon(build_app_icon())
     _install_sigint(app)
+
+    # One instance per session: a second launch just tells the user where
+    # to find the running one (tray) and exits.
+    from voice_cmds import single_instance
+
+    if not single_instance.acquire():
+        QMessageBox.information(
+            None,
+            "voice-cmds",
+            "voice-cmds 已经在运行了（请查看系统托盘图标）。",
+        )
+        return 0
 
     config = Config()
     boot = _Bootstrap(config, debug=args.debug)

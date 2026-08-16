@@ -30,8 +30,8 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "hotkey": {
-        "start": "left ctrl+right alt",
-        "stop": "right alt",
+        "start": "ctrl+alt",
+        "stop": "alt",
         "cancel": "esc",
     },
     "stop_mode": "hotkey",

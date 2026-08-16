@@ -1,10 +1,12 @@
 """ONNX embedder for command matching (BGE-small-zh-v1.5).
 
 Replaces the torch / sentence-transformers stack (~700 MB inside the frozen
-bundle) with onnxruntime + the lightweight `tokenizers` library. CLS pooling
-followed by L2 normalization exactly reproduces the sentence-transformers
-output (verified per-text cosine == 1.0 against the torch model), so matching
-scores and behavior are unchanged.
+bundle) with the lightweight `tokenizers` library plus a minimal ctypes
+binding to the onnxruntime.dll that sherpa-onnx already ships for STT
+(voice_cmds/ort_ffi.py) — no separate onnxruntime Python package. CLS
+pooling followed by L2 normalization exactly reproduces the
+sentence-transformers output (verified per-text cosine == 1.0 against the
+torch model), so matching scores and behavior are unchanged.
 """
 from __future__ import annotations
 
@@ -65,16 +67,15 @@ def ensure_embedder_model(
 
 
 class ONNXEmbedder:
-    """SentenceTransformer-compatible .encode() backed by onnxruntime."""
+    """SentenceTransformer-compatible .encode() backed by the ORT C API."""
 
     def __init__(self, onnx_path: Path, tok_path: Path) -> None:
-        import onnxruntime as ort
         from tokenizers import Tokenizer
 
+        from .ort_ffi import ORTSession
+
         self._tokenizer = Tokenizer.from_file(str(tok_path))
-        self._session = ort.InferenceSession(
-            str(onnx_path), providers=["CPUExecutionProvider"]
-        )
+        self._session = ORTSession(str(onnx_path))
 
     def encode(self, texts: list[str], normalize_embeddings: bool = True) -> np.ndarray:
         if isinstance(texts, str):
@@ -83,19 +84,16 @@ class ONNXEmbedder:
             return np.zeros((0, 512), dtype=np.float32)
         enc = self._tokenizer.encode_batch(list(texts))
         max_len = max(len(e.ids) for e in enc)
-        ids = np.zeros((len(texts), max_len), dtype=np.int64)
-        mask = np.zeros((len(texts), max_len), dtype=np.int64)
+        ids = [[0] * max_len for _ in texts]
+        mask = [[0] * max_len for _ in texts]
         for i, e in enumerate(enc):
-            ids[i, : len(e.ids)] = e.ids
-            mask[i, : len(e.ids)] = 1
-        hidden = self._session.run(
-            None,
-            {
-                "input_ids": ids,
-                "attention_mask": mask,
-                "token_type_ids": np.zeros_like(ids),
-            },
-        )[0]
+            ids[i][: len(e.ids)] = e.ids
+            mask[i][: len(e.ids)] = [1] * len(e.ids)
+        flat = self._session.run(ids, mask)
+        dim = len(flat) // (len(texts) * max_len)
+        hidden = np.asarray(flat, dtype=np.float32).reshape(
+            len(texts), max_len, dim
+        )
         # CLS pooling — matches 1_Pooling/config.json of bge-small-zh-v1.5
         # (pooling_mode_cls_token: true), then Normalize layer.
         vec = hidden[:, 0, :].astype(np.float32)
@@ -114,3 +112,4 @@ def prepare_embedder(
     if status_cb:
         status_cb("正在加载语义匹配模型…")
     return ONNXEmbedder(onnx_path, tok_path)
+
